@@ -1,6 +1,6 @@
 import type { DashboardSummary, PlatformStatus, Incident, TicketMetrics, Period } from '../types/api';
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://security-dashboard-api.rodgersbuilders.workers.dev/api';
 
 async function fetchApi<T>(endpoint: string): Promise<T> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
