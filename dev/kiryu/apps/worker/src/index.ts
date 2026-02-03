@@ -29,7 +29,17 @@ app.use('*', timing());
 app.use('*', logger());
 app.use('*', secureHeaders());
 app.use('*', cors({
-  origin: ['https://security-dashboard-e0x.pages.dev', 'http://localhost:3000', 'http://localhost:5173'],
+  origin: (origin) => {
+    // Allow Pages production and preview deployments
+    if (origin?.endsWith('.pages.dev')) return origin;
+    // Allow workers.dev for testing
+    if (origin?.endsWith('.workers.dev')) return origin;
+    // Allow localhost for development
+    if (origin?.startsWith('http://localhost:')) return origin;
+    // Default production domain
+    if (origin === 'https://security-dashboard-e0x.pages.dev') return origin;
+    return null;
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
   exposeHeaders: ['X-Request-Id'],
