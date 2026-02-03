@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { timing } from 'hono/timing';
@@ -13,6 +12,7 @@ import { zscalerRoutes } from './routes/integrations/zscaler';
 import { microsoftRoutes } from './routes/integrations/microsoft';
 import { salesforceRoutes } from './routes/integrations/salesforce';
 import { syncRoutes } from './routes/sync';
+import { uiRoutes } from './routes/ui';
 
 // Middleware
 import { authMiddleware } from './middleware/auth';
@@ -28,24 +28,6 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', timing());
 app.use('*', logger());
 app.use('*', secureHeaders());
-app.use('*', cors({
-  origin: (origin) => {
-    // Allow Pages production and preview deployments
-    if (origin?.endsWith('.pages.dev')) return origin;
-    // Allow workers.dev for testing
-    if (origin?.endsWith('.workers.dev')) return origin;
-    // Allow localhost for development
-    if (origin?.startsWith('http://localhost:')) return origin;
-    // Default production domain
-    if (origin === 'https://security-dashboard-e0x.pages.dev') return origin;
-    return null;
-  },
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-  exposeHeaders: ['X-Request-Id'],
-  maxAge: 86400,
-  credentials: true,
-}));
 
 // Error handling
 app.onError(errorHandler);
@@ -53,7 +35,10 @@ app.onError(errorHandler);
 // Public routes (no auth required)
 app.route('/health', healthRoutes);
 
-// Protected routes (require API key)
+// Dashboard UI (no auth - use Zero Trust for access control)
+app.route('/', uiRoutes);
+
+// Protected API routes (require API key)
 app.use('/api/*', authMiddleware);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/integrations/crowdstrike', crowdstrikeRoutes);
@@ -62,16 +47,6 @@ app.route('/api/integrations/zscaler', zscalerRoutes);
 app.route('/api/integrations/microsoft', microsoftRoutes);
 app.route('/api/integrations/salesforce', salesforceRoutes);
 app.route('/api/sync', syncRoutes);
-
-// Root route
-app.get('/', (c) => {
-  return c.json({
-    name: 'Security Dashboard API',
-    version: '0.1.0',
-    status: 'operational',
-    docs: '/health',
-  });
-});
 
 // 404 handler
 app.notFound((c) => {

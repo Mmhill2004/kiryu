@@ -4,22 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project Overview
 
-Kiryu is a unified security operations dashboard built on Cloudflare's edge platform. It aggregates data from multiple security tools (CrowdStrike, Abnormal Security, Zscaler, Microsoft Defender, Salesforce) to provide visibility into an organization's security posture.
+Kiryu is a unified security operations dashboard built on Cloudflare Workers. It aggregates data from multiple security tools (CrowdStrike, Abnormal Security, Zscaler, Microsoft Defender, Salesforce) to provide visibility into an organization's security posture.
 
 ## Architecture
 
-- **Monorepo** using pnpm workspaces
-- **apps/worker** - Hono API on Cloudflare Workers (backend)
-- **apps/dashboard** - React + Vite + Tailwind on Cloudflare Pages (frontend)
+**Single Worker serving both UI and API** - no separate frontend build pipeline.
+
+- **apps/worker** - Hono app serving HTML (JSX) + JSON API
 - **packages/db** - D1 database migrations
 - **mcp-servers/security-dashboard** - MCP server for Claude integration
 
-### Cloudflare Services Used
-- **Workers** - API backend with scheduled cron triggers (every 15 min)
+### Tech Stack
+- **Runtime**: Cloudflare Workers
+- **Framework**: Hono (API + JSX views)
+- **Interactivity**: htmx
+- **Database**: Cloudflare D1 (SQLite)
+- **Cache**: Cloudflare KV
+- **Storage**: Cloudflare R2
+- **Validation**: Zod
+
+### Cloudflare Services
+- **Workers** - App hosting with scheduled cron triggers (every 15 min)
 - **D1** - SQLite database for persistent storage
 - **R2** - Object storage for reports
 - **KV** - Cache layer
-- **Pages** - Frontend hosting
 
 ## Common Commands
 
@@ -27,46 +35,55 @@ Kiryu is a unified security operations dashboard built on Cloudflare's edge plat
 # Install dependencies
 pnpm install
 
-# Development
-pnpm dev                  # Start worker (API) dev server on :8787
-pnpm dev:dashboard        # Start dashboard dev server on :5173
+# Development (starts on :8787)
+pnpm dev
 
-# Build
-pnpm build               # Build all packages
-pnpm build:worker        # Build worker only
-pnpm build:dashboard     # Build dashboard only
+# Deploy to Cloudflare
+pnpm deploy
 
-# Deploy
-pnpm deploy              # Deploy all to Cloudflare
-pnpm deploy:worker       # Deploy worker only
-pnpm deploy:dashboard    # Deploy dashboard only
-
-# Database
-pnpm db:migrate          # Run D1 migrations (production)
-pnpm db:migrate:local    # Run D1 migrations (local)
+# Database migrations
+pnpm db:migrate        # Remote (production)
+pnpm db:migrate:local  # Local development
 
 # Quality
-pnpm lint                # Lint all packages
-pnpm typecheck           # TypeScript check
-pnpm test                # Run tests (vitest)
+pnpm lint
+pnpm typecheck
+pnpm test
 ```
 
 ## Code Organization
 
-### Worker API Structure (`apps/worker/src/`)
-- `index.ts` - Hono app entry, routes, and scheduled handler
-- `routes/` - API route handlers (dashboard, health, sync, integrations/*)
-- `integrations/` - External API clients (crowdstrike, abnormal, zscaler, microsoft, salesforce)
-- `middleware/` - Auth and error handling middleware
-- `services/` - Business logic (sync service)
-- `types/` - TypeScript types including Cloudflare bindings (Env)
+### Worker Structure (`apps/worker/src/`)
+```
+src/
+├── index.ts              # Hono app entry, routes, scheduled handler
+├── views/                # JSX components for HTML rendering
+│   ├── Layout.tsx        # Base HTML layout with CSS
+│   ├── Dashboard.tsx     # Main dashboard page
+│   └── components/       # Reusable UI components
+├── routes/
+│   ├── ui.tsx            # Dashboard HTML routes
+│   ├── dashboard.ts      # Dashboard API (JSON)
+│   ├── health.ts         # Health check endpoint
+│   ├── sync.ts           # Manual sync trigger
+│   └── integrations/     # Platform-specific API routes
+├── integrations/         # External API clients
+│   ├── crowdstrike/
+│   ├── abnormal/
+│   ├── zscaler/
+│   ├── microsoft/
+│   └── salesforce/
+├── middleware/           # Auth and error handling
+├── services/             # Business logic (sync service)
+└── types/                # TypeScript types
+```
 
-### Dashboard Structure (`apps/dashboard/src/`)
-- `App.tsx` - Main dashboard component
-- `components/` - React components (Card, MetricCard, IncidentTable, SecurityScore, etc.)
-- `hooks/` - Custom hooks (useDashboard)
-- `lib/` - API client utilities
-- `types/` - API response types
+### Routes
+- `GET /` - Dashboard UI (HTML)
+- `GET /health` - Health check (public)
+- `GET /api/dashboard/*` - Dashboard data (requires API key)
+- `GET /api/integrations/*` - Platform-specific endpoints
+- `POST /api/sync` - Trigger manual data sync
 
 ### Database Schema (`packages/db/migrations/`)
 Key tables:
@@ -79,48 +96,51 @@ Key tables:
 
 ## Key Patterns
 
-### API Authentication
-Protected routes under `/api/*` require `X-API-Key` header validated against `DASHBOARD_API_KEY` secret.
-
-### Hono App Structure
+### Hono JSX Views
 ```typescript
-const app = new Hono<{ Bindings: Env }>();
-app.use('/api/*', authMiddleware);
-app.route('/api/dashboard', dashboardRoutes);
+import { Layout } from './views/Layout';
+
+app.get('/', (c) => {
+  return c.html(<Layout><Dashboard data={data} /></Layout>);
+});
 ```
+
+### API Authentication
+Protected routes under `/api/*` require `X-API-Key` header. Dashboard UI uses Zero Trust for access control.
 
 ### Cloudflare Bindings
 Access via context: `c.env.DB`, `c.env.CACHE`, `c.env.REPORTS_BUCKET`
 
-### Integration Clients
-Each integration has a client class in `integrations/{platform}/client.ts` that handles OAuth/API auth and data fetching.
+### htmx for Interactivity
+```html
+<button hx-get="/?period=7d" hx-target="body" hx-swap="outerHTML">
+  Refresh
+</button>
+```
 
 ## Environment & Secrets
 
 Non-sensitive vars are in `wrangler.toml`. Secrets must be set via:
 ```bash
-wrangler secret put CROWDSTRIKE_CLIENT_ID
-wrangler secret put CROWDSTRIKE_CLIENT_SECRET
-wrangler secret put ABNORMAL_API_TOKEN
-wrangler secret put ZSCALER_API_KEY
-wrangler secret put ZSCALER_API_SECRET
-wrangler secret put AZURE_TENANT_ID
-wrangler secret put AZURE_CLIENT_ID
-wrangler secret put AZURE_CLIENT_SECRET
-wrangler secret put SALESFORCE_CLIENT_ID
-wrangler secret put SALESFORCE_CLIENT_SECRET
-wrangler secret put SALESFORCE_PRIVATE_KEY
-wrangler secret put DASHBOARD_API_KEY
+wrangler secret put CROWDSTRIKE_CLIENT_ID --name security-dashboard-api
+wrangler secret put CROWDSTRIKE_CLIENT_SECRET --name security-dashboard-api
+wrangler secret put ABNORMAL_API_TOKEN --name security-dashboard-api
+wrangler secret put ZSCALER_API_KEY --name security-dashboard-api
+wrangler secret put ZSCALER_API_SECRET --name security-dashboard-api
+wrangler secret put AZURE_TENANT_ID --name security-dashboard-api
+wrangler secret put AZURE_CLIENT_ID --name security-dashboard-api
+wrangler secret put AZURE_CLIENT_SECRET --name security-dashboard-api
+wrangler secret put SALESFORCE_CLIENT_ID --name security-dashboard-api
+wrangler secret put SALESFORCE_CLIENT_SECRET --name security-dashboard-api
+wrangler secret put SALESFORCE_PRIVATE_KEY --name security-dashboard-api
+wrangler secret put DASHBOARD_API_KEY --name security-dashboard-api
 ```
 
-## Tech Stack
+## Deployment
 
-- **Runtime**: Cloudflare Workers (Node.js compat)
-- **API Framework**: Hono v4
-- **Validation**: Zod
-- **Frontend**: React 19, Vite 7, Tailwind CSS v4
-- **Charts**: Recharts
-- **Icons**: Lucide React
-- **Testing**: Vitest
-- **Package Manager**: pnpm 8.12+
-- **Node**: 18+
+Push to `main` triggers GitHub Actions deployment, or deploy manually:
+```bash
+pnpm deploy
+```
+
+**Live URL**: https://security-dashboard-api.rodgersbuilders.workers.dev
