@@ -29,7 +29,7 @@ app.use('*', timing());
 app.use('*', logger());
 app.use('*', secureHeaders());
 app.use('*', cors({
-  origin: ['https://security-dashboard.pages.dev', 'http://localhost:3000'],
+  origin: ['https://security-dashboard-e0x.pages.dev', 'http://localhost:3000', 'http://localhost:5173'],
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
   exposeHeaders: ['X-Request-Id'],
