@@ -1,0 +1,33 @@
+{
+  "name": "security-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified security operations dashboard",
+  "scripts": {
+    "dev": "pnpm --filter @security-dashboard/worker dev",
+    "dev:dashboard": "pnpm --filter @security-dashboard/dashboard dev",
+    "build": "pnpm -r build",
+    "build:worker": "pnpm --filter @security-dashboard/worker build",
+    "build:dashboard": "pnpm --filter @security-dashboard/dashboard build",
+    "deploy": "pnpm -r deploy",
+    "deploy:worker": "pnpm --filter @security-dashboard/worker deploy",
+    "deploy:dashboard": "pnpm --filter @security-dashboard/dashboard deploy",
+    "db:migrate": "pnpm --filter @security-dashboard/db migrate",
+    "db:migrate:local": "pnpm --filter @security-dashboard/db migrate:local",
+    "db:seed": "pnpm --filter @security-dashboard/db seed",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.12.0"
+}
