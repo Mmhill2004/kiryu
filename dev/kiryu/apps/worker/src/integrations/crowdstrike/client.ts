@@ -412,36 +412,28 @@ export class CrowdStrikeClient {
 
   /**
    * Get hosts with full details
+   * Note: Limited to avoid Cloudflare Workers subrequest limits (50 per request)
    */
-  async getHosts(limit = 500): Promise<Host[]> {
-    // Query host IDs
+  async getHosts(limit = 100): Promise<Host[]> {
+    // Query host IDs - limit to 100 to stay within subrequest limits
     const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
       `/devices/queries/devices/v1?limit=${limit}&sort=last_seen|desc`
     );
+
+    console.log(`Host query returned ${queryResponse.resources?.length || 0} IDs`);
 
     if (!queryResponse.resources || queryResponse.resources.length === 0) {
       return [];
     }
 
-    // Get full host details (batch in chunks of 100)
-    const hosts: Host[] = [];
-    const chunks = [];
-    for (let i = 0; i < queryResponse.resources.length; i += 100) {
-      chunks.push(queryResponse.resources.slice(i, i + 100));
-    }
+    // Get full host details - CrowdStrike uses GET with query params
+    const idsParam = queryResponse.resources.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+    const detailsResponse = await this.request<{ resources: Host[] }>(
+      `/devices/entities/devices/v2?${idsParam}`
+    );
+    console.log(`Fetched ${detailsResponse.resources?.length || 0} host details`);
 
-    for (const chunk of chunks) {
-      const detailsResponse = await this.request<{ resources: Host[] }>(
-        '/devices/entities/devices/v2',
-        {
-          method: 'POST',
-          body: JSON.stringify({ ids: chunk }),
-        }
-      );
-      hosts.push(...(detailsResponse.resources || []));
-    }
-
-    return hosts;
+    return detailsResponse.resources || [];
   }
 
   /**
@@ -450,13 +442,17 @@ export class CrowdStrikeClient {
   async getHostSummary(): Promise<HostSummary> {
     try {
       // Get total count
+      console.log('Fetching host count...');
       const countResponse = await this.request<{ meta: { pagination: { total: number } } }>(
         '/devices/queries/devices/v1?limit=1'
       );
       const total = countResponse.meta?.pagination?.total || 0;
+      console.log(`Total hosts from API: ${total}`);
 
-      // Get sample of hosts for breakdown
-      const hosts = await this.getHosts(500);
+      // Get sample of hosts for breakdown (limited to 100 to stay within CF subrequest limits)
+      console.log('Fetching host details...');
+      const hosts = await this.getHosts(100);
+      console.log(`Fetched ${hosts.length} host details for sampling`);
 
       const now = new Date();
       const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
@@ -529,18 +525,10 @@ export class CrowdStrikeClient {
         staleEndpoints: Math.round(stale * scaleFactor),
       };
     } catch (error) {
-      console.error('Error fetching hosts:', error);
-      return {
-        total: 0,
-        online: 0,
-        offline: 0,
-        contained: 0,
-        reducedFunctionality: 0,
-        byPlatform: { windows: 0, mac: 0, linux: 0 },
-        byStatus: { normal: 0, contained: 0, containment_pending: 0, lift_containment_pending: 0 },
-        agentVersions: {},
-        staleEndpoints: 0,
-      };
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching hosts:', errorMsg);
+      // Re-throw so the caller knows there was an error
+      throw new Error(`Failed to fetch hosts: ${errorMsg}`);
     }
   }
 
@@ -793,10 +781,11 @@ export class CrowdStrikeClient {
 
   /**
    * Get Zero Trust Assessment scores
+   * Note: Limited to avoid Cloudflare Workers subrequest limits
    */
-  async getZTAScores(limit = 500): Promise<ZTAAssessment[]> {
+  async getZTAScores(limit = 50): Promise<ZTAAssessment[]> {
     try {
-      // Get host IDs first
+      // Get host IDs first - limited to reduce subrequests
       const hostsResponse = await this.request<{ resources: string[] }>(
         `/devices/queries/devices/v1?limit=${limit}`
       );
@@ -828,7 +817,7 @@ export class CrowdStrikeClient {
    */
   async getZTASummary(): Promise<ZTASummary> {
     try {
-      const assessments = await this.getZTAScores(500);
+      const assessments = await this.getZTAScores(50);
 
       if (assessments.length === 0) {
         return {
@@ -890,14 +879,78 @@ export class CrowdStrikeClient {
     vulnerabilities: VulnerabilitySummary;
     zta: ZTASummary;
     fetchedAt: string;
+    errors?: string[];
   }> {
-    const [alerts, hosts, incidents, vulnerabilities, zta] = await Promise.all([
+    const errors: string[] = [];
+
+    // Default values for when individual calls fail
+    const defaultAlerts: AlertSummary = {
+      total: 0,
+      bySeverity: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
+      byStatus: { new: 0, in_progress: 0, resolved: 0 },
+      byTactic: {},
+      byTechnique: {},
+      recentAlerts: [],
+    };
+
+    const defaultHosts: HostSummary = {
+      total: 0,
+      online: 0,
+      offline: 0,
+      contained: 0,
+      reducedFunctionality: 0,
+      byPlatform: { windows: 0, mac: 0, linux: 0 },
+      byStatus: { normal: 0, contained: 0, containment_pending: 0, lift_containment_pending: 0 },
+      agentVersions: {},
+      staleEndpoints: 0,
+    };
+
+    const defaultIncidents: IncidentSummary = {
+      total: 0,
+      open: 0,
+      closed: 0,
+      bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+      byState: { new: 0, reopened: 0, in_progress: 0, closed: 0 },
+      withLateralMovement: 0,
+      avgFineScore: 0,
+      recentIncidents: [],
+    };
+
+    const defaultVulns: VulnerabilitySummary = {
+      total: 0,
+      bySeverity: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+      byStatus: { open: 0, closed: 0, reopen: 0 },
+      byExploitStatus: { available: 0, none: 0, unknown: 0 },
+      topCVEs: [],
+      affectedHosts: 0,
+      withExploits: 0,
+    };
+
+    const defaultZTA: ZTASummary = {
+      totalAssessed: 0,
+      avgScore: 0,
+      scoreDistribution: { excellent: 0, good: 0, fair: 0, poor: 0 },
+      lowestScores: [],
+    };
+
+    // Fetch all data with individual error handling
+    const [alertsResult, hostsResult, incidentsResult, vulnsResult, ztaResult] = await Promise.allSettled([
       this.getAlertSummary(alertDays),
       this.getHostSummary(),
       this.getIncidentSummary(incidentDays),
       this.getVulnerabilitySummary(),
       this.getZTASummary(),
     ]);
+
+    const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value : (errors.push(`Alerts: ${(alertsResult as PromiseRejectedResult).reason}`), defaultAlerts);
+    const hosts = hostsResult.status === 'fulfilled' ? hostsResult.value : (errors.push(`Hosts: ${(hostsResult as PromiseRejectedResult).reason}`), defaultHosts);
+    const incidents = incidentsResult.status === 'fulfilled' ? incidentsResult.value : (errors.push(`Incidents: ${(incidentsResult as PromiseRejectedResult).reason}`), defaultIncidents);
+    const vulnerabilities = vulnsResult.status === 'fulfilled' ? vulnsResult.value : (errors.push(`Vulnerabilities: ${(vulnsResult as PromiseRejectedResult).reason}`), defaultVulns);
+    const zta = ztaResult.status === 'fulfilled' ? ztaResult.value : (errors.push(`ZTA: ${(ztaResult as PromiseRejectedResult).reason}`), defaultZTA);
+
+    if (errors.length > 0) {
+      console.error('CrowdStrike API errors:', errors);
+    }
 
     return {
       alerts,
@@ -906,6 +959,7 @@ export class CrowdStrikeClient {
       vulnerabilities,
       zta,
       fetchedAt: new Date().toISOString(),
+      errors: errors.length > 0 ? errors : undefined,
     };
   }
 

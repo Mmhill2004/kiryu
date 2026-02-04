@@ -15,6 +15,7 @@ interface DashboardData {
     vulnerabilities: VulnerabilitySummary;
     zta: ZTASummary;
     fetchedAt: string;
+    errors?: string[];
   } | null;
   salesforce: TicketMetrics | null;
   platforms: Array<{
@@ -108,6 +109,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         const csStatus = platforms.find(p => p.platform === 'crowdstrike');
         const sfStatus = platforms.find(p => p.platform === 'salesforce');
         const hasErrors = platforms.some(p => p.status === 'error');
+        const hasPartialErrors = crowdstrike?.errors && crowdstrike.errors.length > 0;
         const allNotConfigured = !crowdstrike && !salesforce && !hasErrors;
 
         if (allNotConfigured) {
@@ -118,15 +120,20 @@ export const Dashboard: FC<Props> = ({ data }) => {
           );
         }
 
-        if (hasErrors) {
+        if (hasErrors || hasPartialErrors) {
           return (
             <div class="error-banner" style="background: #fef3c7; border-color: #f59e0b;">
-              <strong>Warning:</strong> Some platforms encountered errors.
+              <strong>Warning:</strong> Some data could not be loaded.
               {csStatus?.status === 'error' && (
                 <div style="margin-top: 0.5rem;">
                   <strong>CrowdStrike:</strong> {csStatus.error_message || 'Unknown error'}
                 </div>
               )}
+              {hasPartialErrors && crowdstrike?.errors?.map((err, i) => (
+                <div style="margin-top: 0.5rem;" key={i}>
+                  <strong>CrowdStrike API:</strong> {err}
+                </div>
+              ))}
               {sfStatus?.status === 'error' && (
                 <div style="margin-top: 0.5rem;">
                   <strong>Salesforce:</strong> {sfStatus.error_message || 'Unknown error'}
