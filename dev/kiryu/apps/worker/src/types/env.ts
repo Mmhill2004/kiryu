@@ -40,6 +40,11 @@ export interface Env {
   SALESFORCE_CLIENT_ID: string;
   SALESFORCE_CLIENT_SECRET: string;
   SALESFORCE_PRIVATE_KEY?: string;
+
+  // Cloudflare API credentials (for Access/Gateway logs)
+  CLOUDFLARE_API_TOKEN?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_ZONE_ID?: string;
 }
 
 /**
