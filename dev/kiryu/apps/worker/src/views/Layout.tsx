@@ -345,4 +345,80 @@ const styles = `
   .shield-icon {
     color: var(--info);
   }
+
+  .refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .refresh-btn .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--card-border);
+  }
+
+  .stat-row:last-child {
+    border-bottom: none;
+  }
+
+  .stat-label {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+  }
+
+  .stat-value {
+    font-weight: 600;
+    font-size: 1rem;
+  }
+
+  .no-data {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 1rem;
+  }
+
+  .tactic-list .stat-label {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .htmx-request {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .htmx-request .refresh-btn .icon {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* Badge variations */
+  .badge-informational { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); }
+
+  /* Responsive table */
+  .card table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  @media (max-width: 768px) {
+    .metric-grid[style*="repeat(5"] {
+      grid-template-columns: repeat(3, 1fr) !important;
+    }
+  }
 `;
