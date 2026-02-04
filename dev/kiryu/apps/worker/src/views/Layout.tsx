@@ -672,6 +672,103 @@ const styles = `
   .status-not_configured { background: var(--not-configured); }
   .status-unknown { background: var(--not-configured); }
 
+  /* Horizontal platform grid */
+  .platform-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-md);
+  }
+
+  .platform-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: var(--space-md);
+    text-align: center;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .platform-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--border-subtle);
+    transition: background 0.2s ease;
+  }
+
+  .platform-card.platform-healthy::before {
+    background: var(--healthy);
+  }
+
+  .platform-card.platform-error::before {
+    background: var(--error);
+  }
+
+  .platform-card.platform-not_configured::before {
+    background: var(--not-configured);
+  }
+
+  .platform-card:hover {
+    border-color: var(--border-default);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .platform-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+  }
+
+  .platform-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .platform-card .platform-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .platform-card-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+  }
+
+  .platform-card-status .status-text {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .platform-card-sync {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: var(--space-xs);
+    font-family: var(--font-mono);
+  }
+
+  .platform-card-error {
+    font-size: 0.65rem;
+    color: var(--error);
+    margin-top: var(--space-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Chart bars */
   .chart-bar {
     display: flex;

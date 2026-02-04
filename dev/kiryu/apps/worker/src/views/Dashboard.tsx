@@ -555,11 +555,6 @@ export const Dashboard: FC<Props> = ({ data }) => {
               </div>
             )}
 
-            <div class={`card ${crowdstrike ? 'col-4' : 'col-12'}`}>
-              <div class="card-title">Platform Status</div>
-              <PlatformStatus platforms={platforms} />
-            </div>
-
             {/* Row 7: Recent Security Tickets (Salesforce) */}
             {salesforce && salesforce.recentTickets.length > 0 && (
               <div class="card col-12">
@@ -664,6 +659,12 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 </table>
               </div>
             )}
+
+            {/* Platform Status - Bottom */}
+            <div class="col-12">
+              <div class="card-title">Platform Integrations</div>
+              <PlatformStatus platforms={platforms} horizontal />
+            </div>
           </div>
         </>
       ) : null}

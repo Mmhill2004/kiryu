@@ -9,16 +9,55 @@ interface Platform {
 
 interface Props {
   platforms: Platform[];
+  horizontal?: boolean;
 }
 
 const statusLabels: Record<string, string> = {
-  healthy: 'Healthy',
+  healthy: 'Connected',
   error: 'Error',
   not_configured: 'Not Configured',
   unknown: 'Unknown',
 };
 
-export const PlatformStatus: FC<Props> = ({ platforms }) => {
+const platformIcons: Record<string, string> = {
+  crowdstrike: '🦅',
+  salesforce: '☁️',
+  abnormal: '🛡️',
+  zscaler: '🔒',
+  microsoft: '🪟',
+  cloudflare: '🌐',
+};
+
+export const PlatformStatus: FC<Props> = ({ platforms, horizontal = false }) => {
+  if (horizontal) {
+    return (
+      <div class="platform-grid">
+        {platforms.map((p) => (
+          <div class={`platform-card platform-${p.status}`} key={p.platform}>
+            <div class="platform-card-header">
+              <span class="platform-icon">{platformIcons[p.platform] || '📦'}</span>
+              <span class="platform-name">{p.platform}</span>
+            </div>
+            <div class="platform-card-status">
+              <span class={`status-dot status-${p.status}`} />
+              <span class="status-text">{statusLabels[p.status] || p.status}</span>
+            </div>
+            {p.last_sync && (
+              <div class="platform-card-sync">
+                {new Date(p.last_sync).toLocaleTimeString()}
+              </div>
+            )}
+            {p.error_message && (
+              <div class="platform-card-error">
+                {p.error_message.slice(0, 50)}{p.error_message.length > 50 ? '...' : ''}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <ul class="platform-list">
       {platforms.map((p) => (
