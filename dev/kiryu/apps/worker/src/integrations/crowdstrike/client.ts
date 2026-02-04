@@ -6,9 +6,13 @@ interface CrowdStrikeToken {
   expires_at: number;
 }
 
+// ============================================
+// Alert Types (Primary - replacing Detections)
+// ============================================
 export interface Alert {
   composite_id: string;
   created_timestamp: string;
+  updated_timestamp: string;
   severity: number;
   severity_name: string;
   status: string;
@@ -18,31 +22,11 @@ export interface Alert {
   tactic_id: string;
   technique: string;
   technique_id: string;
-  hostname?: string;
-  product: string;
-}
-
-export interface Host {
-  device_id: string;
   hostname: string;
-  status: string;
-  platform_name: string;
-  os_version: string;
-  last_seen: string;
-  agent_version: string;
-  reduced_functionality_mode: string;
-}
-
-export interface Incident {
-  incident_id: string;
-  name: string;
-  description: string;
-  status: number;
-  state: string;
-  start: string;
-  end?: string;
-  fine_score: number;
-  host_ids: string[];
+  username: string;
+  product: string;
+  scenario: string;
+  show_in_ui: boolean;
 }
 
 export interface AlertSummary {
@@ -59,19 +43,85 @@ export interface AlertSummary {
     in_progress: number;
     resolved: number;
   };
+  byTactic: Record<string, number>;
+  byTechnique: Record<string, number>;
   recentAlerts: Alert[];
+}
+
+// ============================================
+// Host/Endpoint Types
+// ============================================
+export interface Host {
+  device_id: string;
+  hostname: string;
+  status: string;
+  platform_name: string;
+  os_version: string;
+  os_build: string;
+  last_seen: string;
+  first_seen: string;
+  agent_version: string;
+  agent_local_time: string;
+  reduced_functionality_mode: string;
+  containment_status: string;
+  groups: string[];
+  tags: string[];
+  machine_domain: string;
+  ou: string[];
+  site_name: string;
+  external_ip: string;
+  local_ip: string;
+  mac_address: string;
+  system_manufacturer: string;
+  system_product_name: string;
+  product_type_desc: string;
+  provision_status: string;
+  kernel_version: string;
+  policies: Array<{ policy_id: string; policy_type: string; applied: boolean }>;
 }
 
 export interface HostSummary {
   total: number;
   online: number;
   offline: number;
+  contained: number;
+  reducedFunctionality: number;
   byPlatform: {
     windows: number;
     mac: number;
     linux: number;
   };
-  reducedFunctionality: number;
+  byStatus: {
+    normal: number;
+    contained: number;
+    containment_pending: number;
+    lift_containment_pending: number;
+  };
+  agentVersions: Record<string, number>;
+  staleEndpoints: number; // Not seen in 7+ days
+}
+
+// ============================================
+// Incident Types
+// ============================================
+export interface Incident {
+  incident_id: string;
+  name: string;
+  description: string;
+  status: number;
+  state: string;
+  start: string;
+  end?: string;
+  fine_score: number;
+  host_ids: string[];
+  hosts: Array<{ device_id: string; hostname: string }>;
+  users: Array<{ user_name: string; domain: string }>;
+  tactics: string[];
+  techniques: string[];
+  objectives: string[];
+  lm_host_ids?: string[]; // Lateral movement hosts
+  created: string;
+  modified_timestamp: string;
 }
 
 export interface IncidentSummary {
@@ -84,8 +134,113 @@ export interface IncidentSummary {
     medium: number;
     low: number;
   };
+  byState: {
+    new: number;
+    reopened: number;
+    in_progress: number;
+    closed: number;
+  };
+  withLateralMovement: number;
+  avgFineScore: number;
+  recentIncidents: Incident[];
+  mttr?: number; // Mean time to resolve in hours
 }
 
+// ============================================
+// Spotlight Vulnerability Types
+// ============================================
+export interface Vulnerability {
+  id: string;
+  cve_id: string;
+  aid: string;
+  host_info: {
+    hostname: string;
+    os_version: string;
+    platform: string;
+  };
+  app: {
+    product_name: string;
+    vendor: string;
+    version: string;
+  };
+  severity: string;
+  status: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+  closed_timestamp?: string;
+  exprt_rating: string; // ExPRT AI rating
+  cve: {
+    id: string;
+    base_score: number;
+    severity: string;
+    exploit_status: string;
+    published_date: string;
+    description: string;
+    vector: string;
+  };
+  remediation: {
+    ids: string[];
+  };
+}
+
+export interface VulnerabilitySummary {
+  total: number;
+  bySeverity: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    unknown: number;
+  };
+  byStatus: {
+    open: number;
+    closed: number;
+    reopen: number;
+  };
+  byExploitStatus: {
+    available: number;
+    none: number;
+    unknown: number;
+  };
+  topCVEs: Array<{ cve_id: string; severity: string; affected_hosts: number; exprt_rating: string }>;
+  affectedHosts: number;
+  withExploits: number;
+}
+
+// ============================================
+// Zero Trust Assessment Types
+// ============================================
+export interface ZTAAssessment {
+  aid: string;
+  assessment: {
+    overall: number;
+    sensor_config: number;
+    os: number;
+    version: number;
+  };
+  assessment_items: Array<{
+    name: string;
+    meets_criteria: boolean;
+    weight: number;
+  }>;
+  modified_time: string;
+}
+
+export interface ZTASummary {
+  totalAssessed: number;
+  avgScore: number;
+  scoreDistribution: {
+    excellent: number;  // 80-100
+    good: number;       // 60-79
+    fair: number;       // 40-59
+    poor: number;       // 0-39
+  };
+  lowestScores: Array<{ aid: string; hostname?: string; score: number }>;
+}
+
+// ============================================
+// CrowdStrike Client
+// ============================================
 export class CrowdStrikeClient {
   private baseUrl: string;
   private token: CrowdStrikeToken | null = null;
@@ -130,7 +285,7 @@ export class CrowdStrikeClient {
     this.token = {
       access_token: data.access_token,
       expires_in: data.expires_in,
-      expires_at: Date.now() + (data.expires_in * 1000) - 60000,
+      expires_at: Date.now() + (data.expires_in * 1000) - 60000, // Refresh 1 min early
     };
 
     return this.token.access_token;
@@ -159,270 +314,646 @@ export class CrowdStrikeClient {
     return response.json() as Promise<T>;
   }
 
+  // ============================================
+  // ALERTS API (Primary - replacing Detections)
+  // ============================================
+
   /**
-   * Get alert summary with counts by severity and status (using new Alerts API)
+   * Get alerts with full details
    */
-  async getAlertSummary(daysBack = 7, limit = 100): Promise<AlertSummary> {
+  async getAlerts(daysBack = 7, limit = 500): Promise<Alert[]> {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
     const filter = `created_timestamp:>='${startDate.toISOString()}'`;
 
-    try {
-      // Query alerts using the new Alerts API
-      const response = await this.request<{
-        resources: Alert[];
-        meta: { pagination: { total: number } }
-      }>(
-        `/alerts/queries/alerts/v2?limit=${limit}&sort=created_timestamp|desc&filter=${encodeURIComponent(filter)}`
-      );
+    // Query alert IDs
+    const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+      `/alerts/queries/alerts/v2?limit=${limit}&sort=created_timestamp|desc&filter=${encodeURIComponent(filter)}`
+    );
 
-      const total = response.meta?.pagination?.total || 0;
-      const alerts = response.resources || [];
+    if (!queryResponse.resources || queryResponse.resources.length === 0) {
+      return [];
+    }
 
-      if (alerts.length === 0) {
-        return {
-          total,
-          bySeverity: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
-          byStatus: { new: 0, in_progress: 0, resolved: 0 },
-          recentAlerts: [],
-        };
+    // Get full alert details
+    const detailsResponse = await this.request<{ resources: Alert[] }>(
+      '/alerts/entities/alerts/v2',
+      {
+        method: 'POST',
+        body: JSON.stringify({ composite_ids: queryResponse.resources }),
       }
+    );
 
-      // Get full alert details
-      const alertIds = alerts.map(a => a.composite_id || a).filter(Boolean);
-      let detailedAlerts = alerts;
+    return detailsResponse.resources || [];
+  }
 
-      if (alertIds.length > 0 && typeof alertIds[0] === 'string') {
-        try {
-          const detailsResponse = await this.request<{ resources: Alert[] }>(
-            '/alerts/entities/alerts/v2',
-            {
-              method: 'POST',
-              body: JSON.stringify({ composite_ids: alertIds }),
-            }
-          );
-          detailedAlerts = detailsResponse.resources || alerts;
-        } catch {
-          // Fall back to basic alerts if details fail
+  /**
+   * Get alert summary with counts and breakdowns
+   */
+  async getAlertSummary(daysBack = 7, limit = 500): Promise<AlertSummary> {
+    try {
+      const alerts = await this.getAlerts(daysBack, limit);
+
+      const bySeverity = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
+      const byStatus = { new: 0, in_progress: 0, resolved: 0 };
+      const byTactic: Record<string, number> = {};
+      const byTechnique: Record<string, number> = {};
+
+      for (const alert of alerts) {
+        // Count by severity
+        const sev = alert.severity_name?.toLowerCase() || '';
+        if (sev === 'critical' || alert.severity >= 5) bySeverity.critical++;
+        else if (sev === 'high' || alert.severity === 4) bySeverity.high++;
+        else if (sev === 'medium' || alert.severity === 3) bySeverity.medium++;
+        else if (sev === 'low' || alert.severity === 2) bySeverity.low++;
+        else bySeverity.informational++;
+
+        // Count by status
+        const status = alert.status?.toLowerCase() || '';
+        if (status === 'new') byStatus.new++;
+        else if (status === 'in_progress') byStatus.in_progress++;
+        else byStatus.resolved++;
+
+        // Count by MITRE tactic
+        if (alert.tactic) {
+          byTactic[alert.tactic] = (byTactic[alert.tactic] || 0) + 1;
+        }
+
+        // Count by MITRE technique
+        if (alert.technique) {
+          byTechnique[alert.technique] = (byTechnique[alert.technique] || 0) + 1;
         }
       }
 
-      // Count by severity (severity is 1-5 scale or severity_name)
-      const bySeverity = {
-        critical: detailedAlerts.filter(a => a.severity >= 5 || a.severity_name?.toLowerCase() === 'critical').length,
-        high: detailedAlerts.filter(a => a.severity === 4 || a.severity_name?.toLowerCase() === 'high').length,
-        medium: detailedAlerts.filter(a => a.severity === 3 || a.severity_name?.toLowerCase() === 'medium').length,
-        low: detailedAlerts.filter(a => a.severity === 2 || a.severity_name?.toLowerCase() === 'low').length,
-        informational: detailedAlerts.filter(a => a.severity <= 1 || a.severity_name?.toLowerCase() === 'informational').length,
-      };
-
-      // Count by status
-      const byStatus = {
-        new: detailedAlerts.filter(a => a.status === 'new').length,
-        in_progress: detailedAlerts.filter(a => a.status === 'in_progress').length,
-        resolved: detailedAlerts.filter(a => ['closed', 'true_positive', 'false_positive', 'ignored'].includes(a.status)).length,
-      };
-
       return {
-        total,
+        total: alerts.length,
         bySeverity,
         byStatus,
-        recentAlerts: detailedAlerts.slice(0, 10),
+        byTactic,
+        byTechnique,
+        recentAlerts: alerts.slice(0, 20),
       };
     } catch (error) {
-      console.warn('Failed to get alerts:', error);
+      console.error('Error fetching alerts:', error);
       return {
         total: 0,
         bySeverity: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
         byStatus: { new: 0, in_progress: 0, resolved: 0 },
+        byTactic: {},
+        byTechnique: {},
         recentAlerts: [],
       };
     }
   }
 
+  // ============================================
+  // HOSTS API
+  // ============================================
+
   /**
-   * Get host/endpoint summary
+   * Get hosts with full details
    */
-  async getHostSummary(): Promise<HostSummary> {
-    // Get total host count
-    const countResponse = await this.request<{ meta: { pagination: { total: number } } }>(
-      '/devices/queries/devices/v1?limit=1'
+  async getHosts(limit = 500): Promise<Host[]> {
+    // Query host IDs
+    const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+      `/devices/queries/devices/v1?limit=${limit}&sort=last_seen|desc`
     );
 
-    const total = countResponse.meta?.pagination?.total || 0;
-
-    // Get hosts with details (sample for platform breakdown)
-    const hostsResponse = await this.request<{ resources: string[] }>(
-      '/devices/queries/devices/v1?limit=500'
-    );
-
-    if (!hostsResponse.resources || hostsResponse.resources.length === 0) {
-      return {
-        total,
-        online: 0,
-        offline: 0,
-        byPlatform: { windows: 0, mac: 0, linux: 0 },
-        reducedFunctionality: 0,
-      };
+    if (!queryResponse.resources || queryResponse.resources.length === 0) {
+      return [];
     }
 
-    // Get host details
-    const detailsResponse = await this.request<{ resources: Host[] }>(
-      '/devices/entities/devices/v2',
-      {
-        method: 'POST',
-        body: JSON.stringify({ ids: hostsResponse.resources.slice(0, 100) }),
-      }
-    );
+    // Get full host details (batch in chunks of 100)
+    const hosts: Host[] = [];
+    const chunks = [];
+    for (let i = 0; i < queryResponse.resources.length; i += 100) {
+      chunks.push(queryResponse.resources.slice(i, i + 100));
+    }
 
-    const hosts = detailsResponse.resources || [];
+    for (const chunk of chunks) {
+      const detailsResponse = await this.request<{ resources: Host[] }>(
+        '/devices/entities/devices/v2',
+        {
+          method: 'POST',
+          body: JSON.stringify({ ids: chunk }),
+        }
+      );
+      hosts.push(...(detailsResponse.resources || []));
+    }
 
-    // Calculate time threshold for "online" (seen within last 30 minutes)
-    const onlineThreshold = new Date();
-    onlineThreshold.setMinutes(onlineThreshold.getMinutes() - 30);
-
-    const online = hosts.filter(h => new Date(h.last_seen) > onlineThreshold).length;
-    const offline = hosts.length - online;
-
-    const byPlatform = {
-      windows: hosts.filter(h => h.platform_name?.toLowerCase().includes('windows')).length,
-      mac: hosts.filter(h => h.platform_name?.toLowerCase().includes('mac')).length,
-      linux: hosts.filter(h => h.platform_name?.toLowerCase().includes('linux')).length,
-    };
-
-    const reducedFunctionality = hosts.filter(h => h.reduced_functionality_mode === 'yes').length;
-
-    // Scale numbers if we only sampled
-    const scaleFactor = total / Math.max(hosts.length, 1);
-
-    return {
-      total,
-      online: Math.round(online * scaleFactor),
-      offline: Math.round(offline * scaleFactor),
-      byPlatform: {
-        windows: Math.round(byPlatform.windows * scaleFactor),
-        mac: Math.round(byPlatform.mac * scaleFactor),
-        linux: Math.round(byPlatform.linux * scaleFactor),
-      },
-      reducedFunctionality: Math.round(reducedFunctionality * scaleFactor),
-    };
+    return hosts;
   }
 
   /**
-   * Get incident summary
+   * Get host summary with breakdowns
    */
-  async getIncidentSummary(daysBack = 30): Promise<IncidentSummary> {
+  async getHostSummary(): Promise<HostSummary> {
+    try {
+      // Get total count
+      const countResponse = await this.request<{ meta: { pagination: { total: number } } }>(
+        '/devices/queries/devices/v1?limit=1'
+      );
+      const total = countResponse.meta?.pagination?.total || 0;
+
+      // Get sample of hosts for breakdown
+      const hosts = await this.getHosts(500);
+
+      const now = new Date();
+      const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      let online = 0, offline = 0, contained = 0, reducedFunctionality = 0, stale = 0;
+      const byPlatform = { windows: 0, mac: 0, linux: 0 };
+      const byStatus = { normal: 0, contained: 0, containment_pending: 0, lift_containment_pending: 0 };
+      const agentVersions: Record<string, number> = {};
+
+      for (const host of hosts) {
+        const lastSeen = new Date(host.last_seen);
+
+        // Online/offline (30 min threshold)
+        if (lastSeen > thirtyMinAgo) online++;
+        else offline++;
+
+        // Stale (7+ days)
+        if (lastSeen < sevenDaysAgo) stale++;
+
+        // Containment
+        const containmentStatus = host.containment_status?.toLowerCase() || 'normal';
+        if (containmentStatus === 'contained') {
+          contained++;
+          byStatus.contained++;
+        } else if (containmentStatus === 'containment_pending') {
+          byStatus.containment_pending++;
+        } else if (containmentStatus === 'lift_containment_pending') {
+          byStatus.lift_containment_pending++;
+        } else {
+          byStatus.normal++;
+        }
+
+        // Reduced functionality
+        if (host.reduced_functionality_mode === 'yes') reducedFunctionality++;
+
+        // Platform
+        const platform = host.platform_name?.toLowerCase() || '';
+        if (platform.includes('windows')) byPlatform.windows++;
+        else if (platform.includes('mac')) byPlatform.mac++;
+        else if (platform.includes('linux')) byPlatform.linux++;
+
+        // Agent versions
+        if (host.agent_version) {
+          agentVersions[host.agent_version] = (agentVersions[host.agent_version] || 0) + 1;
+        }
+      }
+
+      // Scale if sampled
+      const scaleFactor = total / Math.max(hosts.length, 1);
+
+      return {
+        total,
+        online: Math.round(online * scaleFactor),
+        offline: Math.round(offline * scaleFactor),
+        contained: Math.round(contained * scaleFactor),
+        reducedFunctionality: Math.round(reducedFunctionality * scaleFactor),
+        byPlatform: {
+          windows: Math.round(byPlatform.windows * scaleFactor),
+          mac: Math.round(byPlatform.mac * scaleFactor),
+          linux: Math.round(byPlatform.linux * scaleFactor),
+        },
+        byStatus: {
+          normal: Math.round(byStatus.normal * scaleFactor),
+          contained: Math.round(byStatus.contained * scaleFactor),
+          containment_pending: Math.round(byStatus.containment_pending * scaleFactor),
+          lift_containment_pending: Math.round(byStatus.lift_containment_pending * scaleFactor),
+        },
+        agentVersions,
+        staleEndpoints: Math.round(stale * scaleFactor),
+      };
+    } catch (error) {
+      console.error('Error fetching hosts:', error);
+      return {
+        total: 0,
+        online: 0,
+        offline: 0,
+        contained: 0,
+        reducedFunctionality: 0,
+        byPlatform: { windows: 0, mac: 0, linux: 0 },
+        byStatus: { normal: 0, contained: 0, containment_pending: 0, lift_containment_pending: 0 },
+        agentVersions: {},
+        staleEndpoints: 0,
+      };
+    }
+  }
+
+  // ============================================
+  // INCIDENTS API
+  // ============================================
+
+  /**
+   * Get incidents with full details
+   */
+  async getIncidents(daysBack = 30, limit = 500): Promise<Incident[]> {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
     const filter = `start:>='${startDate.toISOString()}'`;
 
+    // Query incident IDs
+    const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+      `/incidents/queries/incidents/v1?limit=${limit}&sort=start|desc&filter=${encodeURIComponent(filter)}`
+    );
+
+    if (!queryResponse.resources || queryResponse.resources.length === 0) {
+      return [];
+    }
+
+    // Get full incident details
+    const detailsResponse = await this.request<{ resources: Incident[] }>(
+      '/incidents/entities/incidents/GET/v1',
+      {
+        method: 'POST',
+        body: JSON.stringify({ ids: queryResponse.resources }),
+      }
+    );
+
+    return detailsResponse.resources || [];
+  }
+
+  /**
+   * Get incident summary with breakdowns
+   */
+  async getIncidentSummary(daysBack = 30): Promise<IncidentSummary> {
     try {
-      const idsResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
-        `/incidents/queries/incidents/v1?limit=500&sort=start|desc&filter=${encodeURIComponent(filter)}`
-      );
+      const incidents = await this.getIncidents(daysBack);
 
-      const total = idsResponse.meta?.pagination?.total || 0;
+      let open = 0, closed = 0, withLateralMovement = 0;
+      let totalFineScore = 0;
+      const bySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
+      const byState = { new: 0, reopened: 0, in_progress: 0, closed: 0 };
+      const resolutionTimes: number[] = [];
 
-      if (!idsResponse.resources || idsResponse.resources.length === 0) {
-        return {
-          total,
-          open: 0,
-          closed: 0,
-          bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
-        };
+      for (const incident of incidents) {
+        // Status: 20=new, 25=reopened, 30=in_progress, 40=closed
+        if (incident.status >= 40) {
+          closed++;
+          byState.closed++;
+          // Calculate resolution time
+          if (incident.end && incident.start) {
+            const startTime = new Date(incident.start).getTime();
+            const endTime = new Date(incident.end).getTime();
+            resolutionTimes.push((endTime - startTime) / (1000 * 60 * 60)); // Hours
+          }
+        } else {
+          open++;
+          if (incident.status === 20) byState.new++;
+          else if (incident.status === 25) byState.reopened++;
+          else byState.in_progress++;
+        }
+
+        // Severity by fine_score: 1-39=low, 40-59=medium, 60-79=high, 80-100=critical
+        if (incident.fine_score >= 80) bySeverity.critical++;
+        else if (incident.fine_score >= 60) bySeverity.high++;
+        else if (incident.fine_score >= 40) bySeverity.medium++;
+        else bySeverity.low++;
+
+        totalFineScore += incident.fine_score || 0;
+
+        // Lateral movement
+        if (incident.lm_host_ids && incident.lm_host_ids.length > 0) {
+          withLateralMovement++;
+        }
       }
 
-      // Get incident details
-      const detailsResponse = await this.request<{ resources: Incident[] }>(
-        '/incidents/entities/incidents/GET/v1',
-        {
-          method: 'POST',
-          body: JSON.stringify({ ids: idsResponse.resources }),
-        }
-      );
+      const avgFineScore = incidents.length > 0 ? Math.round(totalFineScore / incidents.length) : 0;
+      const mttr = resolutionTimes.length > 0
+        ? Math.round(resolutionTimes.reduce((a, b) => a + b, 0) / resolutionTimes.length)
+        : undefined;
 
-      const incidents = detailsResponse.resources || [];
-
-      // Status: 20=new, 25=reopened, 30=in_progress, 40=closed
-      const open = incidents.filter(i => i.status < 40).length;
-      const closed = incidents.filter(i => i.status >= 40).length;
-
-      // fine_score ranges: 1-39=low, 40-59=medium, 60-79=high, 80-100=critical
-      const bySeverity = {
-        critical: incidents.filter(i => i.fine_score >= 80).length,
-        high: incidents.filter(i => i.fine_score >= 60 && i.fine_score < 80).length,
-        medium: incidents.filter(i => i.fine_score >= 40 && i.fine_score < 60).length,
-        low: incidents.filter(i => i.fine_score < 40).length,
+      return {
+        total: incidents.length,
+        open,
+        closed,
+        bySeverity,
+        byState,
+        withLateralMovement,
+        avgFineScore,
+        recentIncidents: incidents.slice(0, 10),
+        mttr,
       };
-
-      return { total, open, closed, bySeverity };
     } catch (error) {
-      // Incidents API might not be available
-      console.warn('Failed to get incidents:', error);
+      console.error('Error fetching incidents:', error);
       return {
         total: 0,
         open: 0,
         closed: 0,
         bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+        byState: { new: 0, reopened: 0, in_progress: 0, closed: 0 },
+        withLateralMovement: 0,
+        avgFineScore: 0,
+        recentIncidents: [],
       };
     }
   }
 
+  // ============================================
+  // SPOTLIGHT VULNERABILITIES API
+  // ============================================
+
   /**
-   * Get vulnerability summary (Spotlight module)
+   * Get vulnerabilities with full details
    */
-  async getVulnerabilitySummary(): Promise<{ critical: number; high: number; medium: number; low: number; total: number }> {
+  async getVulnerabilities(limit = 500): Promise<Vulnerability[]> {
     try {
-      // Get vulnerability aggregates
-      const response = await this.request<{ resources: Array<{ severity: string; count: number }> }>(
-        '/spotlight/aggregates/vulnerabilities/GET/v1',
+      // Query vulnerability IDs (only open/critical/high by default)
+      const filter = `status:'open'+cve.severity:['CRITICAL','HIGH']`;
+      const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+        `/spotlight/queries/vulnerabilities/v1?limit=${limit}&filter=${encodeURIComponent(filter)}`
+      );
+
+      if (!queryResponse.resources || queryResponse.resources.length === 0) {
+        return [];
+      }
+
+      // Get full vulnerability details
+      const detailsResponse = await this.request<{ resources: Vulnerability[] }>(
+        '/spotlight/entities/vulnerabilities/v2',
         {
           method: 'POST',
-          body: JSON.stringify([{
-            name: 'severity',
-            type: 'terms',
-            field: 'cve.severity',
-          }]),
+          body: JSON.stringify({ ids: queryResponse.resources }),
         }
       );
 
-      const buckets = response.resources || [];
-      const counts = {
-        critical: 0,
-        high: 0,
-        medium: 0,
-        low: 0,
-        total: 0,
-      };
+      return detailsResponse.resources || [];
+    } catch (error) {
+      console.error('Error fetching vulnerabilities:', error);
+      return [];
+    }
+  }
 
-      for (const bucket of buckets) {
-        const severity = bucket.severity?.toLowerCase();
-        if (severity === 'critical') counts.critical = bucket.count;
-        else if (severity === 'high') counts.high = bucket.count;
-        else if (severity === 'medium') counts.medium = bucket.count;
-        else if (severity === 'low') counts.low = bucket.count;
-        counts.total += bucket.count || 0;
+  /**
+   * Get vulnerability summary
+   */
+  async getVulnerabilitySummary(): Promise<VulnerabilitySummary> {
+    try {
+      // Use aggregates endpoint for faster counts
+      const aggregateResponse = await this.request<{ resources: Array<{ name: string; buckets: Array<{ label: string; count: number }> }> }>(
+        '/spotlight/aggregates/vulnerabilities/GET/v1',
+        {
+          method: 'POST',
+          body: JSON.stringify([
+            { name: 'severity', type: 'terms', field: 'cve.severity' },
+            { name: 'status', type: 'terms', field: 'status' },
+            { name: 'exploit_status', type: 'terms', field: 'cve.exploit_status' },
+          ]),
+        }
+      );
+
+      const bySeverity = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
+      const byStatus = { open: 0, closed: 0, reopen: 0 };
+      const byExploitStatus = { available: 0, none: 0, unknown: 0 };
+      let total = 0;
+
+      for (const agg of aggregateResponse.resources || []) {
+        for (const bucket of agg.buckets || []) {
+          const label = bucket.label?.toLowerCase() || '';
+          const count = bucket.count || 0;
+
+          if (agg.name === 'severity') {
+            if (label === 'critical') bySeverity.critical = count;
+            else if (label === 'high') bySeverity.high = count;
+            else if (label === 'medium') bySeverity.medium = count;
+            else if (label === 'low') bySeverity.low = count;
+            else bySeverity.unknown += count;
+            total += count;
+          } else if (agg.name === 'status') {
+            if (label === 'open') byStatus.open = count;
+            else if (label === 'closed') byStatus.closed = count;
+            else if (label === 'reopen') byStatus.reopen = count;
+          } else if (agg.name === 'exploit_status') {
+            if (label.includes('available')) byExploitStatus.available = count;
+            else if (label === 'none') byExploitStatus.none = count;
+            else byExploitStatus.unknown += count;
+          }
+        }
       }
 
-      return counts;
+      // Get top CVEs
+      const vulns = await this.getVulnerabilities(100);
+      const cveMap = new Map<string, { severity: string; count: number; exprt_rating: string }>();
+
+      for (const vuln of vulns) {
+        const existing = cveMap.get(vuln.cve_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          cveMap.set(vuln.cve_id, {
+            severity: vuln.cve?.severity || vuln.severity || 'UNKNOWN',
+            count: 1,
+            exprt_rating: vuln.exprt_rating || 'N/A',
+          });
+        }
+      }
+
+      const topCVEs = Array.from(cveMap.entries())
+        .map(([cve_id, data]) => ({
+          cve_id,
+          severity: data.severity,
+          affected_hosts: data.count,
+          exprt_rating: data.exprt_rating,
+        }))
+        .sort((a, b) => b.affected_hosts - a.affected_hosts)
+        .slice(0, 10);
+
+      const affectedHostIds = new Set(vulns.map(v => v.aid));
+
+      return {
+        total,
+        bySeverity,
+        byStatus,
+        byExploitStatus,
+        topCVEs,
+        affectedHosts: affectedHostIds.size,
+        withExploits: byExploitStatus.available,
+      };
     } catch (error) {
-      // Spotlight API might not be available
-      console.warn('Failed to get vulnerabilities:', error);
-      return { critical: 0, high: 0, medium: 0, low: 0, total: 0 };
+      console.error('Error fetching vulnerability summary:', error);
+      return {
+        total: 0,
+        bySeverity: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        byStatus: { open: 0, closed: 0, reopen: 0 },
+        byExploitStatus: { available: 0, none: 0, unknown: 0 },
+        topCVEs: [],
+        affectedHosts: 0,
+        withExploits: 0,
+      };
     }
+  }
+
+  // ============================================
+  // ZERO TRUST ASSESSMENT API
+  // ============================================
+
+  /**
+   * Get Zero Trust Assessment scores
+   */
+  async getZTAScores(limit = 500): Promise<ZTAAssessment[]> {
+    try {
+      // Get host IDs first
+      const hostsResponse = await this.request<{ resources: string[] }>(
+        `/devices/queries/devices/v1?limit=${limit}`
+      );
+
+      if (!hostsResponse.resources || hostsResponse.resources.length === 0) {
+        return [];
+      }
+
+      // Get ZTA assessments for those hosts
+      const ztaResponse = await this.request<{ resources: ZTAAssessment[] }>(
+        '/zero-trust-assessment/entities/assessments/v1',
+        {
+          method: 'GET',
+          headers: {
+            'ids': hostsResponse.resources.join(','),
+          },
+        }
+      );
+
+      return ztaResponse.resources || [];
+    } catch (error) {
+      console.error('Error fetching ZTA scores:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get ZTA summary
+   */
+  async getZTASummary(): Promise<ZTASummary> {
+    try {
+      const assessments = await this.getZTAScores(500);
+
+      if (assessments.length === 0) {
+        return {
+          totalAssessed: 0,
+          avgScore: 0,
+          scoreDistribution: { excellent: 0, good: 0, fair: 0, poor: 0 },
+          lowestScores: [],
+        };
+      }
+
+      let totalScore = 0;
+      const scoreDistribution = { excellent: 0, good: 0, fair: 0, poor: 0 };
+      const scores: Array<{ aid: string; score: number }> = [];
+
+      for (const assessment of assessments) {
+        const score = assessment.assessment?.overall || 0;
+        totalScore += score;
+        scores.push({ aid: assessment.aid, score });
+
+        if (score >= 80) scoreDistribution.excellent++;
+        else if (score >= 60) scoreDistribution.good++;
+        else if (score >= 40) scoreDistribution.fair++;
+        else scoreDistribution.poor++;
+      }
+
+      const avgScore = Math.round(totalScore / assessments.length);
+      const lowestScores = scores
+        .sort((a, b) => a.score - b.score)
+        .slice(0, 10);
+
+      return {
+        totalAssessed: assessments.length,
+        avgScore,
+        scoreDistribution,
+        lowestScores,
+      };
+    } catch (error) {
+      console.error('Error fetching ZTA summary:', error);
+      return {
+        totalAssessed: 0,
+        avgScore: 0,
+        scoreDistribution: { excellent: 0, good: 0, fair: 0, poor: 0 },
+        lowestScores: [],
+      };
+    }
+  }
+
+  // ============================================
+  // COMBINED SUMMARY
+  // ============================================
+
+  /**
+   * Get full dashboard summary
+   */
+  async getFullSummary(alertDays = 7, incidentDays = 30): Promise<{
+    alerts: AlertSummary;
+    hosts: HostSummary;
+    incidents: IncidentSummary;
+    vulnerabilities: VulnerabilitySummary;
+    zta: ZTASummary;
+    fetchedAt: string;
+  }> {
+    const [alerts, hosts, incidents, vulnerabilities, zta] = await Promise.all([
+      this.getAlertSummary(alertDays),
+      this.getHostSummary(),
+      this.getIncidentSummary(incidentDays),
+      this.getVulnerabilitySummary(),
+      this.getZTASummary(),
+    ]);
+
+    return {
+      alerts,
+      hosts,
+      incidents,
+      vulnerabilities,
+      zta,
+      fetchedAt: new Date().toISOString(),
+    };
   }
 
   /**
    * Test API connection
    */
-  async testConnection(): Promise<{ success: boolean; message: string }> {
+  async testConnection(): Promise<{ success: boolean; message: string; modules: string[] }> {
     try {
       await this.authenticate();
-      return { success: true, message: 'Successfully connected to CrowdStrike API' };
+
+      // Test each module
+      const modules: string[] = [];
+
+      try {
+        await this.request('/alerts/queries/alerts/v2?limit=1');
+        modules.push('Alerts');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/devices/queries/devices/v1?limit=1');
+        modules.push('Hosts');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/incidents/queries/incidents/v1?limit=1');
+        modules.push('Incidents');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/spotlight/queries/vulnerabilities/v1?limit=1');
+        modules.push('Spotlight');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/zero-trust-assessment/entities/assessments/v1?ids=test');
+        modules.push('ZTA');
+      } catch { /* Module not available */ }
+
+      return {
+        success: true,
+        message: `Connected to CrowdStrike API. Available modules: ${modules.join(', ')}`,
+        modules,
+      };
     } catch (error) {
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to connect',
+        modules: [],
       };
     }
   }
