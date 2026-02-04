@@ -21,6 +21,7 @@ interface DashboardData {
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
     last_sync: string | null;
+    error_message?: string;
   }>;
   period: string;
   lastUpdated: string;
@@ -102,11 +103,43 @@ export const Dashboard: FC<Props> = ({ data }) => {
         </div>
       </header>
 
-      {!crowdstrike && !salesforce ? (
-        <div class="error-banner">
-          No platforms configured. Configure CrowdStrike or Salesforce credentials to see data.
-        </div>
-      ) : (
+      {/* Error/Warning banners */}
+      {(() => {
+        const csStatus = platforms.find(p => p.platform === 'crowdstrike');
+        const sfStatus = platforms.find(p => p.platform === 'salesforce');
+        const hasErrors = platforms.some(p => p.status === 'error');
+        const allNotConfigured = !crowdstrike && !salesforce && !hasErrors;
+
+        if (allNotConfigured) {
+          return (
+            <div class="error-banner">
+              No platforms configured. Configure CrowdStrike or Salesforce credentials to see data.
+            </div>
+          );
+        }
+
+        if (hasErrors) {
+          return (
+            <div class="error-banner" style="background: #fef3c7; border-color: #f59e0b;">
+              <strong>Warning:</strong> Some platforms encountered errors.
+              {csStatus?.status === 'error' && (
+                <div style="margin-top: 0.5rem;">
+                  <strong>CrowdStrike:</strong> {csStatus.error_message || 'Unknown error'}
+                </div>
+              )}
+              {sfStatus?.status === 'error' && (
+                <div style="margin-top: 0.5rem;">
+                  <strong>Salesforce:</strong> {sfStatus.error_message || 'Unknown error'}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        return null;
+      })()}
+
+      {crowdstrike || salesforce ? (
         <>
           {/* Main Grid */}
           <div class="grid">
@@ -148,7 +181,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
             {/* Row 2: Alerts by Severity (CrowdStrike) */}
             {crowdstrike && (
               <div class="col-12">
-                <div class="card-title" style="margin-bottom: 1rem;">Active Alerts</div>
+                <div class="card-title" style="margin-bottom: 1rem;">Active Alerts by Severity</div>
                 <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
                   <MetricCard
                     label="Critical"
@@ -173,6 +206,33 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <MetricCard
                     label="Informational"
                     value={crowdstrike.alerts.bySeverity.informational}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Row 2b: Alerts by Status (CrowdStrike) */}
+            {crowdstrike && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">Alert Status</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(4, 1fr);">
+                  <MetricCard
+                    label="Total Alerts"
+                    value={crowdstrike.alerts.total}
+                  />
+                  <MetricCard
+                    label="New"
+                    value={crowdstrike.alerts.byStatus.new}
+                    severity={crowdstrike.alerts.byStatus.new > 0 ? 'high' : undefined}
+                  />
+                  <MetricCard
+                    label="In Progress"
+                    value={crowdstrike.alerts.byStatus.in_progress}
+                    severity={crowdstrike.alerts.byStatus.in_progress > 0 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="Resolved"
+                    value={crowdstrike.alerts.byStatus.resolved}
                   />
                 </div>
               </div>
@@ -221,10 +281,10 @@ export const Dashboard: FC<Props> = ({ data }) => {
             {crowdstrike && (
               <>
                 <div class="card col-4">
-                  <div class="card-title">Incidents</div>
+                  <div class="card-title">Incidents ({crowdstrike.incidents.total})</div>
                   <div class="stat-row">
                     <span class="stat-label">Open</span>
-                    <span class="stat-value">{crowdstrike.incidents.open}</span>
+                    <span class="stat-value severity-high">{crowdstrike.incidents.open}</span>
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">Closed</span>
@@ -234,7 +294,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <span class="stat-label">With Lateral Movement</span>
                     <span class="stat-value severity-critical">{crowdstrike.incidents.withLateralMovement}</span>
                   </div>
-                  {crowdstrike.incidents.mttr && (
+                  {crowdstrike.incidents.mttr !== undefined && (
                     <div class="stat-row">
                       <span class="stat-label">MTTR</span>
                       <span class="stat-value">{crowdstrike.incidents.mttr}h</span>
@@ -244,10 +304,19 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <span class="stat-label">Avg Fine Score</span>
                     <span class="stat-value">{crowdstrike.incidents.avgFineScore}</span>
                   </div>
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                    <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                      <span class="badge badge-critical">Critical: {crowdstrike.incidents.bySeverity.critical}</span>
+                      <span class="badge badge-high">High: {crowdstrike.incidents.bySeverity.high}</span>
+                      <span class="badge badge-medium">Medium: {crowdstrike.incidents.bySeverity.medium}</span>
+                      <span class="badge badge-low">Low: {crowdstrike.incidents.bySeverity.low}</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="card col-4">
-                  <div class="card-title">Vulnerabilities (Spotlight)</div>
+                  <div class="card-title">Vulnerabilities (Spotlight) - {crowdstrike.vulnerabilities.total}</div>
                   {crowdstrike.vulnerabilities.total > 0 ? (
                     <>
                       <div class="stat-row">
@@ -259,12 +328,27 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         <span class="stat-value severity-high">{crowdstrike.vulnerabilities.bySeverity.high}</span>
                       </div>
                       <div class="stat-row">
+                        <span class="stat-label">Medium</span>
+                        <span class="stat-value severity-medium">{crowdstrike.vulnerabilities.bySeverity.medium}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Low</span>
+                        <span class="stat-value">{crowdstrike.vulnerabilities.bySeverity.low}</span>
+                      </div>
+                      <div class="stat-row">
                         <span class="stat-label">With Exploits</span>
                         <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.withExploits}</span>
                       </div>
                       <div class="stat-row">
                         <span class="stat-label">Affected Hosts</span>
                         <span class="stat-value">{crowdstrike.vulnerabilities.affectedHosts}</span>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">Status:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-high">Open: {crowdstrike.vulnerabilities.byStatus.open}</span>
+                          <span class="badge">Closed: {crowdstrike.vulnerabilities.byStatus.closed}</span>
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -368,7 +452,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
               </>
             )}
 
-            {/* Row 6: MITRE ATT&CK Tactics + Platform by OS + Platform Status */}
+            {/* Row 6: MITRE ATT&CK Tactics + Techniques + Platform by OS */}
             {crowdstrike && (
               <>
                 <div class="card col-4">
@@ -391,6 +475,25 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 </div>
 
                 <div class="card col-4">
+                  <div class="card-title">Top MITRE ATT&CK Techniques</div>
+                  {Object.keys(crowdstrike.alerts.byTechnique).length > 0 ? (
+                    <div class="technique-list">
+                      {Object.entries(crowdstrike.alerts.byTechnique)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([technique, count]) => (
+                          <div class="stat-row" key={technique}>
+                            <span class="stat-label">{technique}</span>
+                            <span class="stat-value">{count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No techniques detected</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
                   <div class="card-title">Endpoints by Platform</div>
                   <ThreatChart
                     data={{
@@ -407,6 +510,39 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   />
                 </div>
               </>
+            )}
+
+            {/* Row 6b: Host Status Details */}
+            {crowdstrike && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">Host Containment Status</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                  <MetricCard
+                    label="Normal"
+                    value={crowdstrike.hosts.byStatus.normal}
+                  />
+                  <MetricCard
+                    label="Contained"
+                    value={crowdstrike.hosts.byStatus.contained}
+                    severity={crowdstrike.hosts.byStatus.contained > 0 ? 'critical' : undefined}
+                  />
+                  <MetricCard
+                    label="Containment Pending"
+                    value={crowdstrike.hosts.byStatus.containment_pending}
+                    severity={crowdstrike.hosts.byStatus.containment_pending > 0 ? 'high' : undefined}
+                  />
+                  <MetricCard
+                    label="Lift Pending"
+                    value={crowdstrike.hosts.byStatus.lift_containment_pending}
+                    severity={crowdstrike.hosts.byStatus.lift_containment_pending > 0 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="Reduced Mode"
+                    value={crowdstrike.hosts.reducedFunctionality}
+                    severity={crowdstrike.hosts.reducedFunctionality > 0 ? 'high' : undefined}
+                  />
+                </div>
+              </div>
             )}
 
             <div class={`card ${crowdstrike ? 'col-4' : 'col-12'}`}>
@@ -483,9 +619,44 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 </table>
               </div>
             )}
+
+            {/* Row 9: Top CVEs (CrowdStrike Spotlight) */}
+            {crowdstrike && crowdstrike.vulnerabilities.topCVEs && crowdstrike.vulnerabilities.topCVEs.length > 0 && (
+              <div class="card col-12">
+                <div class="card-title">Top CVEs by Affected Hosts</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>CVE ID</th>
+                      <th>Severity</th>
+                      <th>Affected Hosts</th>
+                      <th>ExPRT Rating</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {crowdstrike.vulnerabilities.topCVEs.slice(0, 10).map((cve) => (
+                      <tr key={cve.cve_id}>
+                        <td>
+                          <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`} target="_blank" rel="noopener noreferrer">
+                            {cve.cve_id}
+                          </a>
+                        </td>
+                        <td>
+                          <span class={`badge badge-${cve.severity?.toLowerCase() === 'critical' ? 'critical' : cve.severity?.toLowerCase() === 'high' ? 'high' : cve.severity?.toLowerCase() === 'medium' ? 'medium' : 'low'}`}>
+                            {cve.severity || 'Unknown'}
+                          </span>
+                        </td>
+                        <td>{cve.affected_hosts}</td>
+                        <td>{cve.exprt_rating || 'N/A'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
-      )}
+      ) : null}
 
       {/* Footer */}
       <footer>

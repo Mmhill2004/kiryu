@@ -20,6 +20,7 @@ uiRoutes.get('/', async (c) => {
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
     last_sync: string | null;
+    error_message?: string;
   }> = [];
 
   // Fetch data from both platforms in parallel
@@ -41,11 +42,13 @@ uiRoutes.get('/', async (c) => {
           });
         })
         .catch((error) => {
-          console.error('CrowdStrike fetch error:', error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error('CrowdStrike fetch error:', errorMsg);
           platforms.push({
             platform: 'crowdstrike',
             status: 'error',
             last_sync: null,
+            error_message: errorMsg,
           });
         })
     );
@@ -70,11 +73,13 @@ uiRoutes.get('/', async (c) => {
           });
         })
         .catch((error) => {
-          console.error('Salesforce fetch error:', error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error('Salesforce fetch error:', errorMsg);
           platforms.push({
             platform: 'salesforce',
             status: 'error',
             last_sync: null,
+            error_message: errorMsg,
           });
         })
     );
