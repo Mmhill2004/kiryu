@@ -36,11 +36,10 @@ app.onError(errorHandler);
 // Public routes (no auth required)
 app.route('/health', healthRoutes);
 
-// Dashboard UI (no auth - use Zero Trust for access control)
+// Dashboard UI (Zero Trust handles auth)
 app.route('/', uiRoutes);
 
-// Protected API routes (require API key)
-app.use('/api/*', authMiddleware);
+// Dashboard data endpoints (Zero Trust handles auth)
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/integrations/crowdstrike', crowdstrikeRoutes);
 app.route('/api/integrations/abnormal', abnormalRoutes);
@@ -48,7 +47,10 @@ app.route('/api/integrations/zscaler', zscalerRoutes);
 app.route('/api/integrations/microsoft', microsoftRoutes);
 app.route('/api/integrations/salesforce', salesforceRoutes);
 app.route('/api/integrations/cloudflare', cloudflareRoutes);
-app.route('/api/sync', syncRoutes);
+
+// Protected API routes (require API key for programmatic access)
+app.use('/api/v1/*', authMiddleware);
+app.route('/api/v1/sync', syncRoutes);
 
 // 404 handler
 app.notFound((c) => {
