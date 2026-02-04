@@ -4,7 +4,7 @@ import { SecurityScore } from './components/SecurityScore';
 import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
-import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary } from '../integrations/crowdstrike/client';
+import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary, NGSIEMSummary, OverWatchSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
 
 interface DashboardData {
@@ -13,6 +13,8 @@ interface DashboardData {
     hosts: HostSummary;
     incidents: IncidentSummary;
     zta: ZTASummary;
+    ngsiem: NGSIEMSummary;
+    overwatch: OverWatchSummary;
     fetchedAt: string;
     errors?: string[];
   } | null;
@@ -353,7 +355,116 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <p class="no-data">No ZTA data available</p>
                   )}
                 </div>
+
+                {/* NGSIEM Card */}
+                <div class="card col-4">
+                  <div class="card-title">NGSIEM / LogScale</div>
+                  {crowdstrike.ngsiem.repositories > 0 || crowdstrike.ngsiem.eventCounts.total > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Repositories</span>
+                        <span class="stat-value">{crowdstrike.ngsiem.repositories}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Total Ingest</span>
+                        <span class="stat-value">{crowdstrike.ngsiem.totalIngestGB} GB</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Saved Searches</span>
+                        <span class="stat-value">{crowdstrike.ngsiem.savedSearches}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Events (24h)</span>
+                        <span class="stat-value">{crowdstrike.ngsiem.eventCounts.total.toLocaleString()}</span>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">Recent Activity:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-info">Auth: {crowdstrike.ngsiem.recentActivity.authEvents.toLocaleString()}</span>
+                          <span class="badge badge-info">Network: {crowdstrike.ngsiem.recentActivity.networkEvents.toLocaleString()}</span>
+                          <span class="badge badge-info">Process: {crowdstrike.ngsiem.recentActivity.processEvents.toLocaleString()}</span>
+                          <span class="badge badge-info">DNS: {crowdstrike.ngsiem.recentActivity.dnsEvents.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p class="no-data">No NGSIEM data available</p>
+                  )}
+                </div>
               </>
+            )}
+
+            {/* Row 4b: OverWatch Threat Hunting */}
+            {crowdstrike && (
+              <>
+                <div class="card col-6">
+                  <div class="card-title">OverWatch Threat Hunting</div>
+                  {crowdstrike.overwatch.totalDetections > 0 || crowdstrike.overwatch.activeEscalations > 0 ? (
+                    <>
+                      <div class="metric-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 1rem;">
+                        <div style="text-align: center;">
+                          <div style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">{crowdstrike.overwatch.totalDetections}</div>
+                          <div style="font-size: 0.75rem; color: var(--text-muted);">Total Detections</div>
+                        </div>
+                        <div style="text-align: center;">
+                          <div style="font-size: 1.5rem; font-weight: 700; color: var(--severity-high);">{crowdstrike.overwatch.activeEscalations}</div>
+                          <div style="font-size: 0.75rem; color: var(--text-muted);">Active Escalations</div>
+                        </div>
+                        <div style="text-align: center;">
+                          <div style="font-size: 1.5rem; font-weight: 700; color: var(--severity-low);">{crowdstrike.overwatch.resolvedLast30Days}</div>
+                          <div style="font-size: 0.75rem; color: var(--text-muted);">Resolved (30d)</div>
+                        </div>
+                        <div style="text-align: center;">
+                          <div style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">{crowdstrike.overwatch.huntingCoverage.hostsMonitored}</div>
+                          <div style="font-size: 0.75rem; color: var(--text-muted);">Hosts Monitored</div>
+                        </div>
+                      </div>
+                      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="badge badge-critical">Critical: {crowdstrike.overwatch.detectionsBySeverity.critical}</span>
+                        <span class="badge badge-high">High: {crowdstrike.overwatch.detectionsBySeverity.high}</span>
+                        <span class="badge badge-medium">Medium: {crowdstrike.overwatch.detectionsBySeverity.medium}</span>
+                        <span class="badge badge-low">Low: {crowdstrike.overwatch.detectionsBySeverity.low}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p class="no-data">No OverWatch data available</p>
+                  )}
+                </div>
+
+                <div class="card col-6">
+                  <div class="card-title">OverWatch Tactics Detected</div>
+                  {Object.keys(crowdstrike.overwatch.detectionsByTactic).length > 0 ? (
+                    <div class="tactic-list">
+                      {Object.entries(crowdstrike.overwatch.detectionsByTactic)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 6)
+                        .map(([tactic, count]) => (
+                          <div class="stat-row" key={tactic}>
+                            <span class="stat-label">{tactic}</span>
+                            <span class="stat-value">{count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No tactics detected by OverWatch</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Top NGSIEM Event Types */}
+            {crowdstrike && crowdstrike.ngsiem.topEventTypes.length > 0 && (
+              <div class="card col-12">
+                <div class="card-title">Top Event Types (NGSIEM - Last 24h)</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                  {crowdstrike.ngsiem.topEventTypes.slice(0, 5).map((evt) => (
+                    <div key={evt.type} style="text-align: center; padding: 0.75rem;">
+                      <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary);">{evt.count.toLocaleString()}</div>
+                      <div style="font-size: 0.7rem; color: var(--text-muted); word-break: break-word;">{evt.type}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Row 5: Salesforce Details */}

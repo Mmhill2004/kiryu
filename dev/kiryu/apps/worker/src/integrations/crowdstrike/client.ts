@@ -208,6 +208,102 @@ export interface VulnerabilitySummary {
 }
 
 // ============================================
+// NGSIEM / LogScale Types
+// ============================================
+export interface NGSIEMRepository {
+  id: string;
+  name: string;
+  description?: string;
+  retention_days?: number;
+  ingest_size_bytes?: number;
+  compressed_size_bytes?: number;
+}
+
+export interface NGSIEMSavedSearch {
+  id: string;
+  name: string;
+  description?: string;
+  search_query: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+  mode?: string;
+}
+
+export interface NGSIEMEvent {
+  timestamp: string;
+  event_type: string;
+  aid?: string;
+  hostname?: string;
+  user_name?: string;
+  event_data: Record<string, unknown>;
+}
+
+export interface NGSIEMSummary {
+  repositories: number;
+  totalIngestGB: number;
+  savedSearches: number;
+  eventCounts: {
+    total: number;
+    byType: Record<string, number>;
+  };
+  recentActivity: {
+    authEvents: number;
+    networkEvents: number;
+    processEvents: number;
+    dnsEvents: number;
+  };
+  topEventTypes: Array<{ type: string; count: number }>;
+}
+
+// ============================================
+// OverWatch Types
+// ============================================
+export interface OverWatchDetection {
+  id: string;
+  detection_id: string;
+  severity: string;
+  tactic: string;
+  technique: string;
+  hostname: string;
+  created_timestamp: string;
+  description: string;
+  status: string;
+  assigned_to?: string;
+}
+
+export interface OverWatchIncident {
+  id: string;
+  incident_id: string;
+  name: string;
+  description: string;
+  severity: number;
+  status: string;
+  created_timestamp: string;
+  host_count: number;
+  user_count: number;
+}
+
+export interface OverWatchSummary {
+  totalDetections: number;
+  detectionsBySeverity: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  detectionsByTactic: Record<string, number>;
+  activeEscalations: number;
+  resolvedLast30Days: number;
+  avgTimeToEscalate?: number; // hours
+  recentDetections: OverWatchDetection[];
+  huntingCoverage: {
+    hostsMonitored: number;
+    threatsIdentified: number;
+    falsePositiveRate?: number;
+  };
+}
+
+// ============================================
 // Zero Trust Assessment Types
 // ============================================
 export interface ZTAAssessment {
@@ -866,6 +962,358 @@ export class CrowdStrikeClient {
   }
 
   // ============================================
+  // NGSIEM / LOGSCALE API
+  // ============================================
+
+  /**
+   * Get NGSIEM repositories
+   */
+  async getNGSIEMRepositories(): Promise<NGSIEMRepository[]> {
+    try {
+      const response = await this.request<{ resources: NGSIEMRepository[] }>(
+        '/loggingreadonly/combined/repos/v1'
+      );
+      return response.resources || [];
+    } catch (error) {
+      console.error('Error fetching NGSIEM repositories:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get NGSIEM saved searches
+   */
+  async getNGSIEMSavedSearches(): Promise<NGSIEMSavedSearch[]> {
+    try {
+      const response = await this.request<{ resources: NGSIEMSavedSearch[] }>(
+        '/loggingreadonly/entities/saved-searches/v1'
+      );
+      return response.resources || [];
+    } catch (error) {
+      console.error('Error fetching NGSIEM saved searches:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Execute a LogScale query
+   */
+  async executeNGSIEMQuery(
+    repoName: string,
+    query: string,
+    startTime: string,
+    endTime: string
+  ): Promise<NGSIEMEvent[]> {
+    try {
+      const response = await this.request<{ resources: NGSIEMEvent[] }>(
+        '/loggingreadonly/entities/query/v1',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            repo_name: repoName,
+            search_query: query,
+            search_query_args: {},
+            start: startTime,
+            end: endTime,
+            limit: 1000,
+          }),
+        }
+      );
+      return response.resources || [];
+    } catch (error) {
+      console.error('Error executing NGSIEM query:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get NGSIEM summary with event counts and activity
+   */
+  async getNGSIEMSummary(): Promise<NGSIEMSummary> {
+    try {
+      // Fetch repositories and saved searches in parallel
+      const [repos, savedSearches] = await Promise.all([
+        this.getNGSIEMRepositories(),
+        this.getNGSIEMSavedSearches(),
+      ]);
+
+      // Calculate total ingest size
+      const totalIngestBytes = repos.reduce((sum, r) => sum + (r.ingest_size_bytes || 0), 0);
+      const totalIngestGB = Math.round((totalIngestBytes / (1024 * 1024 * 1024)) * 100) / 100;
+
+      // Try to get event counts from aggregates if available
+      let eventCounts = { total: 0, byType: {} as Record<string, number> };
+      let recentActivity = { authEvents: 0, networkEvents: 0, processEvents: 0, dnsEvents: 0 };
+
+      try {
+        // Query for event type distribution (last 24 hours)
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        // Try to get aggregate counts from the primary repo
+        if (repos.length > 0) {
+          const aggregateResponse = await this.request<{
+            resources: Array<{ name: string; buckets: Array<{ label: string; count: number }> }>;
+          }>(
+            '/loggingreadonly/aggregates/events/GET/v1',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                date_ranges: [{
+                  from: yesterday.toISOString(),
+                  to: now.toISOString(),
+                }],
+                field: 'event_simpleName',
+                filter: '',
+                interval: 'day',
+                name: 'event_types',
+                type: 'terms',
+                size: 20,
+              }),
+            }
+          );
+
+          for (const agg of aggregateResponse.resources || []) {
+            for (const bucket of agg.buckets || []) {
+              const eventType = bucket.label || 'unknown';
+              const count = bucket.count || 0;
+              eventCounts.byType[eventType] = count;
+              eventCounts.total += count;
+
+              // Categorize into activity types
+              const lowerType = eventType.toLowerCase();
+              if (lowerType.includes('auth') || lowerType.includes('logon') || lowerType.includes('credential')) {
+                recentActivity.authEvents += count;
+              } else if (lowerType.includes('network') || lowerType.includes('connection') || lowerType.includes('socket')) {
+                recentActivity.networkEvents += count;
+              } else if (lowerType.includes('process') || lowerType.includes('exec')) {
+                recentActivity.processEvents += count;
+              } else if (lowerType.includes('dns')) {
+                recentActivity.dnsEvents += count;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching NGSIEM event aggregates:', error);
+      }
+
+      // Sort top event types
+      const topEventTypes = Object.entries(eventCounts.byType)
+        .map(([type, count]) => ({ type, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      return {
+        repositories: repos.length,
+        totalIngestGB,
+        savedSearches: savedSearches.length,
+        eventCounts,
+        recentActivity,
+        topEventTypes,
+      };
+    } catch (error) {
+      console.error('Error fetching NGSIEM summary:', error);
+      return {
+        repositories: 0,
+        totalIngestGB: 0,
+        savedSearches: 0,
+        eventCounts: { total: 0, byType: {} },
+        recentActivity: { authEvents: 0, networkEvents: 0, processEvents: 0, dnsEvents: 0 },
+        topEventTypes: [],
+      };
+    }
+  }
+
+  // ============================================
+  // OVERWATCH API
+  // ============================================
+
+  /**
+   * Get OverWatch detections
+   */
+  async getOverWatchDetections(daysBack = 30, limit = 100): Promise<OverWatchDetection[]> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - daysBack);
+      const filter = `created_timestamp:>='${startDate.toISOString()}'`;
+
+      // Query detection IDs
+      const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+        `/overwatch-dashboards/queries/detections/v1?limit=${limit}&sort=created_timestamp|desc&filter=${encodeURIComponent(filter)}`
+      );
+
+      if (!queryResponse.resources || queryResponse.resources.length === 0) {
+        return [];
+      }
+
+      // Get full detection details
+      const detailsResponse = await this.request<{ resources: OverWatchDetection[] }>(
+        '/overwatch-dashboards/entities/detections/v1',
+        {
+          method: 'POST',
+          body: JSON.stringify({ ids: queryResponse.resources }),
+        }
+      );
+
+      return detailsResponse.resources || [];
+    } catch (error) {
+      console.error('Error fetching OverWatch detections:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get OverWatch incidents/escalations
+   */
+  async getOverWatchIncidents(daysBack = 30): Promise<OverWatchIncident[]> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - daysBack);
+      const filter = `created_timestamp:>='${startDate.toISOString()}'`;
+
+      const response = await this.request<{ resources: OverWatchIncident[] }>(
+        `/overwatch-dashboards/entities/incidents/v1?filter=${encodeURIComponent(filter)}`
+      );
+
+      return response.resources || [];
+    } catch (error) {
+      console.error('Error fetching OverWatch incidents:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get OverWatch aggregate counts
+   */
+  async getOverWatchAggregates(): Promise<{
+    detections: { total: number; bySeverity: Record<string, number> };
+    events: { total: number; byType: Record<string, number> };
+  }> {
+    try {
+      const response = await this.request<{
+        resources: Array<{ name: string; value: number; buckets?: Array<{ label: string; count: number }> }>;
+      }>(
+        '/overwatch-dashboards/aggregates/detections-global-counts/v1'
+      );
+
+      const result = {
+        detections: { total: 0, bySeverity: {} as Record<string, number> },
+        events: { total: 0, byType: {} as Record<string, number> },
+      };
+
+      for (const resource of response.resources || []) {
+        if (resource.buckets) {
+          for (const bucket of resource.buckets) {
+            if (resource.name === 'severity') {
+              result.detections.bySeverity[bucket.label] = bucket.count;
+            } else {
+              result.events.byType[bucket.label] = bucket.count;
+            }
+          }
+        }
+        if (resource.name === 'total') {
+          result.detections.total = resource.value;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error fetching OverWatch aggregates:', error);
+      return {
+        detections: { total: 0, bySeverity: {} },
+        events: { total: 0, byType: {} },
+      };
+    }
+  }
+
+  /**
+   * Get OverWatch summary with detections and escalations
+   */
+  async getOverWatchSummary(): Promise<OverWatchSummary> {
+    try {
+      // Fetch detections and aggregates in parallel
+      const [detections, aggregates] = await Promise.all([
+        this.getOverWatchDetections(30, 50),
+        this.getOverWatchAggregates(),
+      ]);
+
+      const detectionsBySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
+      const detectionsByTactic: Record<string, number> = {};
+      let activeEscalations = 0;
+      let resolvedLast30Days = 0;
+      const escalationTimes: number[] = [];
+
+      for (const detection of detections) {
+        // Count by severity
+        const sev = detection.severity?.toLowerCase() || '';
+        if (sev === 'critical') detectionsBySeverity.critical++;
+        else if (sev === 'high') detectionsBySeverity.high++;
+        else if (sev === 'medium') detectionsBySeverity.medium++;
+        else detectionsBySeverity.low++;
+
+        // Count by tactic
+        if (detection.tactic) {
+          detectionsByTactic[detection.tactic] = (detectionsByTactic[detection.tactic] || 0) + 1;
+        }
+
+        // Track status
+        const status = detection.status?.toLowerCase() || '';
+        if (status === 'open' || status === 'in_progress' || status === 'new') {
+          activeEscalations++;
+        } else if (status === 'closed' || status === 'resolved') {
+          resolvedLast30Days++;
+        }
+      }
+
+      // Use aggregate totals if available, otherwise use detection counts
+      const totalDetections = aggregates.detections.total || detections.length;
+
+      // Get host monitoring count from existing host summary (simplified)
+      let hostsMonitored = 0;
+      try {
+        const hostCount = await this.request<{ meta: { pagination: { total: number } } }>(
+          '/devices/queries/devices/v1?limit=1'
+        );
+        hostsMonitored = hostCount.meta?.pagination?.total || 0;
+      } catch {
+        // Ignore - we already have this from hosts API
+      }
+
+      return {
+        totalDetections,
+        detectionsBySeverity,
+        detectionsByTactic,
+        activeEscalations,
+        resolvedLast30Days,
+        avgTimeToEscalate: escalationTimes.length > 0
+          ? Math.round(escalationTimes.reduce((a, b) => a + b, 0) / escalationTimes.length)
+          : undefined,
+        recentDetections: detections.slice(0, 10),
+        huntingCoverage: {
+          hostsMonitored,
+          threatsIdentified: totalDetections,
+          falsePositiveRate: undefined, // Would need historical data
+        },
+      };
+    } catch (error) {
+      console.error('Error fetching OverWatch summary:', error);
+      return {
+        totalDetections: 0,
+        detectionsBySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+        detectionsByTactic: {},
+        activeEscalations: 0,
+        resolvedLast30Days: 0,
+        recentDetections: [],
+        huntingCoverage: {
+          hostsMonitored: 0,
+          threatsIdentified: 0,
+        },
+      };
+    }
+  }
+
+  // ============================================
   // COMBINED SUMMARY
   // ============================================
 
@@ -878,6 +1326,8 @@ export class CrowdStrikeClient {
     hosts: HostSummary;
     incidents: IncidentSummary;
     zta: ZTASummary;
+    ngsiem: NGSIEMSummary;
+    overwatch: OverWatchSummary;
     fetchedAt: string;
     errors?: string[];
   }> {
@@ -923,18 +1373,41 @@ export class CrowdStrikeClient {
       lowestScores: [],
     };
 
-    // Fetch all data with individual error handling (Spotlight removed - no license)
-    const [alertsResult, hostsResult, incidentsResult, ztaResult] = await Promise.allSettled([
+    const defaultNGSIEM: NGSIEMSummary = {
+      repositories: 0,
+      totalIngestGB: 0,
+      savedSearches: 0,
+      eventCounts: { total: 0, byType: {} },
+      recentActivity: { authEvents: 0, networkEvents: 0, processEvents: 0, dnsEvents: 0 },
+      topEventTypes: [],
+    };
+
+    const defaultOverWatch: OverWatchSummary = {
+      totalDetections: 0,
+      detectionsBySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+      detectionsByTactic: {},
+      activeEscalations: 0,
+      resolvedLast30Days: 0,
+      recentDetections: [],
+      huntingCoverage: { hostsMonitored: 0, threatsIdentified: 0 },
+    };
+
+    // Fetch all data with individual error handling
+    const [alertsResult, hostsResult, incidentsResult, ztaResult, ngsiemResult, overwatchResult] = await Promise.allSettled([
       this.getAlertSummary(alertDays),
       this.getHostSummary(),
       this.getIncidentSummary(incidentDays),
       this.getZTASummary(),
+      this.getNGSIEMSummary(),
+      this.getOverWatchSummary(),
     ]);
 
     const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value : (errors.push(`Alerts: ${(alertsResult as PromiseRejectedResult).reason}`), defaultAlerts);
     const hosts = hostsResult.status === 'fulfilled' ? hostsResult.value : (errors.push(`Hosts: ${(hostsResult as PromiseRejectedResult).reason}`), defaultHosts);
     const incidents = incidentsResult.status === 'fulfilled' ? incidentsResult.value : (errors.push(`Incidents: ${(incidentsResult as PromiseRejectedResult).reason}`), defaultIncidents);
     const zta = ztaResult.status === 'fulfilled' ? ztaResult.value : (errors.push(`ZTA: ${(ztaResult as PromiseRejectedResult).reason}`), defaultZTA);
+    const ngsiem = ngsiemResult.status === 'fulfilled' ? ngsiemResult.value : (errors.push(`NGSIEM: ${(ngsiemResult as PromiseRejectedResult).reason}`), defaultNGSIEM);
+    const overwatch = overwatchResult.status === 'fulfilled' ? overwatchResult.value : (errors.push(`OverWatch: ${(overwatchResult as PromiseRejectedResult).reason}`), defaultOverWatch);
 
     if (errors.length > 0) {
       console.error('CrowdStrike API errors:', errors);
@@ -945,6 +1418,8 @@ export class CrowdStrikeClient {
       hosts,
       incidents,
       zta,
+      ngsiem,
+      overwatch,
       fetchedAt: new Date().toISOString(),
       errors: errors.length > 0 ? errors : undefined,
     };
@@ -980,6 +1455,16 @@ export class CrowdStrikeClient {
       try {
         await this.request('/zero-trust-assessment/entities/assessments/v1?ids=test');
         modules.push('ZTA');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/loggingreadonly/combined/repos/v1?limit=1');
+        modules.push('NGSIEM');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/overwatch-dashboards/aggregates/detections-global-counts/v1');
+        modules.push('OverWatch');
       } catch { /* Module not available */ }
 
       return {
