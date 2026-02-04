@@ -1,53 +1,61 @@
-# Security Dashboard
+# Kiryu Security Dashboard
 
-A unified security operations dashboard built on Cloudflare's edge platform that aggregates data from multiple security tools to provide leadership with clear visibility into your organization's security posture.
+A unified security operations dashboard built on Cloudflare Workers that aggregates data from multiple security tools to provide leadership with clear visibility into your organization's security posture.
 
-## 🛡️ Integrated Platforms
+**Live Dashboard**: https://security-dashboard-api.rodgersbuilders.workers.dev
 
-- **CrowdStrike Falcon** - Endpoint detection and response
-- **Abnormal Security** - Email security and account protection
-- **Zscaler** - Cloud security and web gateway
-- **Microsoft Defender** - Endpoint and cloud security
-- **Azure Defender** - Cloud workload protection
-- **Salesforce Service Cloud** - Security ticket management
+## Integrated Platforms
 
-## 🏗️ Architecture
+| Platform | Status | Data Collected |
+|----------|--------|----------------|
+| **CrowdStrike Falcon** | ✅ Active | Alerts, hosts, incidents, vulnerabilities, ZTA scores |
+| **Salesforce Service Cloud** | ✅ Active | Security tickets, MTTR, SLA compliance, agent workload |
+| **Abnormal Security** | ⚪ Ready | Email threats, phishing attempts |
+| **Zscaler** | ⚪ Ready | Web security events, blocked categories |
+| **Microsoft Defender** | ⚪ Ready | Security alerts, Secure Score, compliance |
+| **Cloudflare** | ⚪ Ready | Access logs, Gateway events |
+
+## Architecture
+
+Single Cloudflare Worker serving both the HTML dashboard and REST API:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│              Security Dashboard (Frontend)                │
-│                  Cloudflare Pages                         │
-└────────────────────────┬─────────────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│               Hono API (Cloudflare Worker)                │
-│  • REST API  • Cron Triggers  • Data Aggregation          │
-└────────────────────────┬─────────────────────────────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-    ┌─────────┐    ┌───────────┐    ┌─────────┐
-    │   D1    │    │    R2     │    │   KV    │
-    │ (Data)  │    │ (Reports) │    │ (Cache) │
-    └─────────┘    └───────────┘    └─────────┘
+┌─────────────────────────────────────────────────┐
+│    Cloudflare Worker (Hono + JSX)               │
+│    • HTML Dashboard (/)                         │
+│    • REST API (/api/*)                          │
+│    • Scheduled Sync (cron every 15 min)         │
+└─────────────────────┬───────────────────────────┘
+                      │
+      ┌───────────────┼───────────────┐
+      ▼               ▼               ▼
+  ┌───────┐     ┌─────────┐     ┌───────┐
+  │  D1   │     │   R2    │     │  KV   │
+  │(SQLite)│    │(Reports)│     │(Cache)│
+  └───────┘     └─────────┘     └───────┘
 ```
 
-## 🚀 Quick Start
+**Tech Stack**:
+- Hono (API framework + JSX views)
+- htmx (frontend interactivity)
+- Cloudflare D1, R2, KV
+- Cloudflare Zero Trust (authentication)
+
+## Quick Start
 
 ### Prerequisites
 
 - Node.js 18+
 - pnpm (`npm install -g pnpm`)
 - Wrangler CLI (`npm install -g wrangler`)
-- Cloudflare account (Workers Paid plan recommended)
+- Cloudflare account
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/security-dashboard.git
-cd security-dashboard
+git clone https://github.com/Mmhill2004/kiryu.git
+cd kiryu
 
 # Install dependencies
 pnpm install
@@ -55,119 +63,96 @@ pnpm install
 # Login to Cloudflare
 wrangler login
 
-# Set up local environment
-cp .env.example .env.local
-
-# Create D1 database
-wrangler d1 create security-dashboard-db
-
-# Run database migrations
-pnpm run db:migrate
-
 # Start development server
 pnpm dev
 ```
 
-### Cloudflare Resources Setup
+### Deploy
 
 ```bash
-# Create D1 Database
-wrangler d1 create security-dashboard-db
-
-# Create R2 Bucket
-wrangler r2 bucket create security-reports
-
-# Create KV Namespace
-wrangler kv:namespace create SECURITY_CACHE
-
-# Add secrets (repeat for each credential)
-wrangler secret put CROWDSTRIKE_CLIENT_ID
-wrangler secret put CROWDSTRIKE_CLIENT_SECRET
-# ... etc
+cd apps/worker
+pnpm deploy
 ```
 
-## 📁 Project Structure
-
-```
-security-dashboard/
-├── apps/
-│   ├── worker/              # Cloudflare Worker (Hono API)
-│   └── dashboard/           # Cloudflare Pages (Frontend)
-├── packages/
-│   ├── shared/              # Shared types and utilities
-│   └── db/                  # Database schemas and migrations
-├── mcp-servers/             # MCP servers for Claude integration
-├── docs/                    # Documentation
-└── .github/workflows/       # CI/CD
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-See `.env.example` for all required environment variables.
-
-### Cloudflare Secrets
-
-All sensitive credentials should be stored as Cloudflare Secrets:
+### Configure Secrets
 
 ```bash
-wrangler secret put <SECRET_NAME>
+# CrowdStrike (required for endpoint data)
+wrangler secret put CROWDSTRIKE_CLIENT_ID --name security-dashboard-api
+wrangler secret put CROWDSTRIKE_CLIENT_SECRET --name security-dashboard-api
+
+# Salesforce (required for ticket data)
+wrangler secret put SALESFORCE_INSTANCE_URL --name security-dashboard-api
+wrangler secret put SALESFORCE_CLIENT_ID --name security-dashboard-api
+wrangler secret put SALESFORCE_CLIENT_SECRET --name security-dashboard-api
 ```
 
-## 📊 Dashboard Features
+## Dashboard Features
 
-- **Executive Summary** - High-level security posture at a glance
-- **Threat Overview** - Blocked threats across all platforms
-- **Incident Tracking** - Open incidents by severity and age
-- **Trend Analysis** - Week-over-week and month-over-month comparisons
-- **Platform Health** - Status of all integrated security tools
-- **Ticket Metrics** - MTTR and ticket volume trends
+### Security Overview
+- **Security Score** - Calculated from alert severity weights
+- **Endpoint Overview** - Total, online, contained, stale endpoints
+- **Active Alerts** - By severity (Critical, High, Medium, Low)
 
-## 🤖 MCP Servers
+### Service Desk Metrics
+- **Open Tickets** - Current backlog
+- **MTTR** - Mean Time to Resolution (overall and by priority)
+- **SLA Compliance** - Percentage meeting 4-hour target
+- **Escalation Rate** - Percentage of escalated tickets
+- **Backlog Aging** - Tickets by age bucket (<24h, 24-48h, 48-72h, >72h)
+- **Agent Workload** - Open tickets per agent
 
-This project includes MCP (Model Context Protocol) servers for use with Claude Desktop:
+### CrowdStrike Details
+- Incidents (open, closed, lateral movement)
+- Vulnerabilities (Spotlight)
+- Zero Trust Assessment scores
+- MITRE ATT&CK tactics breakdown
+- Endpoints by platform (Windows, macOS, Linux)
 
-```bash
-# Install MCP servers
-cd mcp-servers/security-dashboard
-pnpm install
-pnpm build
+### Platform Status
+- Real-time health status for all integrations
+- Last sync timestamp
 
-# Add to Claude Desktop config
-# See mcp-servers/README.md for configuration
+## API Endpoints
+
+### Dashboard
+- `GET /` - HTML dashboard
+- `GET /api/dashboard/summary` - Executive summary JSON
+
+### CrowdStrike
+- `GET /api/integrations/crowdstrike/summary` - Full summary
+- `GET /api/integrations/crowdstrike/alerts` - Alert details
+- `GET /api/integrations/crowdstrike/hosts` - Host inventory
+
+### Salesforce
+- `GET /api/integrations/salesforce/test` - Test connection
+- `GET /api/integrations/salesforce/metrics` - All KPIs
+- `GET /api/integrations/salesforce/tickets` - Recent tickets
+- `GET /api/integrations/salesforce/open` - Open tickets with aging
+- `GET /api/integrations/salesforce/mttr` - MTTR breakdown
+- `GET /api/integrations/salesforce/workload` - Agent workload
+
+## Project Structure
+
+```
+kiryu/
+├── apps/worker/           # Cloudflare Worker
+│   ├── src/
+│   │   ├── index.ts       # App entry point
+│   │   ├── views/         # JSX components
+│   │   ├── routes/        # API routes
+│   │   ├── integrations/  # Platform API clients
+│   │   └── services/      # Sync service
+│   └── wrangler.toml      # Worker config
+├── packages/db/           # Database migrations
+└── mcp-servers/           # Claude MCP integration
 ```
 
-### Available MCP Tools
+## Documentation
 
-- `get_threat_summary` - Overall threat landscape
-- `search_incidents` - Search across all platforms
-- `get_endpoint_status` - Check endpoint health
-- `analyze_trends` - Trend analysis
-- `get_ticket_status` - Service desk metrics
-- `generate_report` - Create ad-hoc reports
+- [CLAUDE.md](./CLAUDE.md) - AI assistant guidance
+- [ROADMAP.md](./ROADMAP.md) - Project roadmap
 
-## 📖 Documentation
+## License
 
-- [API Documentation](./docs/api/README.md)
-- [Architecture Overview](./docs/architecture/README.md)
-- [Runbooks](./docs/runbooks/README.md)
-- [Development Guide](./docs/DEVELOPMENT.md)
-
-## 🛣️ Roadmap
-
-See [ROADMAP.md](./ROADMAP.md) for the detailed project roadmap.
-
-## 📄 License
-
-MIT License - See [LICENSE](./LICENSE) for details.
-
-## 🤝 Contributing
-
-1. Create a feature branch from `development`
-2. Make your changes
-3. Submit a pull request
-
----
-
-Built with ❤️ on Cloudflare's Edge Platform
+MIT License

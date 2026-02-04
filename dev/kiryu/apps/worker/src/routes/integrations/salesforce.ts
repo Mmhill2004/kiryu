@@ -5,71 +5,177 @@ import { SalesforceClient } from '../../integrations/salesforce/client';
 export const salesforceRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * Get security-related tickets
+ * GET /api/integrations/salesforce/test
+ * Test Salesforce connection
+ */
+salesforceRoutes.get('/test', async (c) => {
+  const client = new SalesforceClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({
+      success: false,
+      message: 'Salesforce is not configured. Set SALESFORCE_INSTANCE_URL, SALESFORCE_CLIENT_ID, and SALESFORCE_CLIENT_SECRET.',
+    });
+  }
+
+  const result = await client.testConnection();
+  return c.json(result);
+});
+
+/**
+ * GET /api/integrations/salesforce/tickets
+ * Get recent security tickets
  */
 salesforceRoutes.get('/tickets', async (c) => {
   const client = new SalesforceClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({
+      error: 'Not configured',
+      message: 'Salesforce credentials not configured',
+    }, 400);
+  }
+
   const days = parseInt(c.req.query('days') || '30');
-  
+  const limit = parseInt(c.req.query('limit') || '100');
+
   try {
-    const tickets = await client.getSecurityTickets(days);
-    return c.json({ tickets, count: tickets.length });
+    const tickets = await client.getSecurityTickets(days, limit);
+    return c.json({
+      success: true,
+      count: tickets.length,
+      tickets,
+    });
   } catch (error) {
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch tickets',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
 });
 
 /**
- * Get open cases
- */
-salesforceRoutes.get('/open-cases', async (c) => {
-  const client = new SalesforceClient(c.env);
-  
-  try {
-    const cases = await client.getOpenCases();
-    return c.json({ cases, count: cases.length });
-  } catch (error) {
-    return c.json({ 
-      error: 'Failed to fetch open cases',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
-  }
-});
-
-/**
- * Get case metrics
+ * GET /api/integrations/salesforce/metrics
+ * Get comprehensive ticket metrics for dashboard
  */
 salesforceRoutes.get('/metrics', async (c) => {
   const client = new SalesforceClient(c.env);
-  const days = parseInt(c.req.query('days') || '30');
-  
+
+  if (!client.isConfigured()) {
+    return c.json({
+      error: 'Not configured',
+      message: 'Salesforce credentials not configured',
+    }, 400);
+  }
+
   try {
-    const metrics = await client.getCaseMetrics(days);
-    return c.json(metrics);
+    const metrics = await client.getDashboardMetrics();
+    return c.json({
+      success: true,
+      metrics,
+    });
   } catch (error) {
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch metrics',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
 });
 
 /**
- * Get SLA compliance
+ * GET /api/integrations/salesforce/open
+ * Get open tickets with aging info
  */
-salesforceRoutes.get('/sla', async (c) => {
+salesforceRoutes.get('/open', async (c) => {
   const client = new SalesforceClient(c.env);
-  
+
+  if (!client.isConfigured()) {
+    return c.json({
+      error: 'Not configured',
+      message: 'Salesforce credentials not configured',
+    }, 400);
+  }
+
   try {
-    const compliance = await client.getSLACompliance();
-    return c.json(compliance);
+    const tickets = await client.getOpenTickets();
+    const aging = client.calculateBacklogAging(tickets);
+
+    return c.json({
+      success: true,
+      count: tickets.length,
+      aging,
+      tickets,
+    });
   } catch (error) {
-    return c.json({ 
-      error: 'Failed to fetch SLA compliance',
-      message: error instanceof Error ? error.message : 'Unknown error'
+    return c.json({
+      error: 'Failed to fetch open tickets',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/integrations/salesforce/mttr
+ * Get MTTR breakdown
+ */
+salesforceRoutes.get('/mttr', async (c) => {
+  const client = new SalesforceClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({
+      error: 'Not configured',
+      message: 'Salesforce credentials not configured',
+    }, 400);
+  }
+
+  const days = parseInt(c.req.query('days') || '30');
+
+  try {
+    const closedTickets = await client.getClosedTickets(days);
+    const mttr = client.calculateMTTR(closedTickets);
+
+    return c.json({
+      success: true,
+      period: `${days} days`,
+      closedCount: closedTickets.length,
+      mttr,
+    });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch MTTR',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/integrations/salesforce/workload
+ * Get agent workload
+ */
+salesforceRoutes.get('/workload', async (c) => {
+  const client = new SalesforceClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({
+      error: 'Not configured',
+      message: 'Salesforce credentials not configured',
+    }, 400);
+  }
+
+  try {
+    const workload = await client.getAgentWorkload();
+
+    return c.json({
+      success: true,
+      agents: workload.map((a) => ({
+        name: a.ownerName,
+        openTickets: a.cnt,
+      })),
+    });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch agent workload',
+      message: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
 });

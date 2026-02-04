@@ -281,31 +281,85 @@ export class SyncService {
     }
 
     const client = new SalesforceClient(this.env);
-    const tickets = await client.getSecurityTickets();
-    
+
+    if (!client.isConfigured()) {
+      return { platform: 'salesforce', status: 'skipped', error: 'Not configured' };
+    }
+
+    const tickets = await client.getSecurityTickets(30, 2000);
+
     let recordsSynced = 0;
 
     for (const ticket of tickets) {
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO tickets 
-        (id, case_number, subject, status, priority, created_at, closed_at, resolution_time_hours)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        ticket.Id,
-        ticket.CaseNumber,
-        ticket.Subject,
-        ticket.Status,
-        ticket.Priority,
-        ticket.CreatedDate,
-        ticket.ClosedDate,
-        ticket.ClosedDate ? 
-          Math.round((new Date(ticket.ClosedDate).getTime() - new Date(ticket.CreatedDate).getTime()) / (1000 * 60 * 60)) : 
-          null
-      ).run();
+      const resolutionMinutes = ticket.ClosedDate
+        ? Math.round(
+            (new Date(ticket.ClosedDate).getTime() - new Date(ticket.CreatedDate).getTime()) /
+              (1000 * 60)
+          )
+        : null;
+
+      // Try to insert into security_tickets (new table), fallback to tickets (old table)
+      try {
+        await this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_tickets (
+            id, case_number, subject, description, status, priority,
+            ticket_type, reason, origin, is_escalated, is_closed,
+            owner_id, owner_name, contact_id, contact_name,
+            account_id, account_name, created_at, closed_at,
+            resolution_time_minutes, synced_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).bind(
+          ticket.Id,
+          ticket.CaseNumber,
+          ticket.Subject,
+          ticket.Description,
+          ticket.Status,
+          ticket.Priority,
+          ticket.Type,
+          ticket.Reason,
+          ticket.Origin,
+          ticket.IsEscalated ? 1 : 0,
+          ticket.IsClosed ? 1 : 0,
+          ticket.OwnerId,
+          ticket.Owner?.Name || null,
+          ticket.ContactId,
+          ticket.Contact?.Name || null,
+          ticket.AccountId,
+          ticket.Account?.Name || null,
+          ticket.CreatedDate,
+          ticket.ClosedDate,
+          resolutionMinutes
+        ).run();
+      } catch {
+        // Fallback to old tickets table if security_tickets doesn't exist
+        await this.env.DB.prepare(`
+          INSERT OR REPLACE INTO tickets
+          (id, case_number, subject, status, priority, created_at, closed_at, resolution_time_hours)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          ticket.Id,
+          ticket.CaseNumber,
+          ticket.Subject,
+          ticket.Status,
+          ticket.Priority,
+          ticket.CreatedDate,
+          ticket.ClosedDate,
+          resolutionMinutes ? Math.round(resolutionMinutes / 60) : null
+        ).run();
+      }
       recordsSynced++;
     }
 
-    await this.updatePlatformStatus('salesforce', 'healthy');
+    // Get metrics for platform status
+    const metrics = await client.getDashboardMetrics();
+
+    await this.updatePlatformStatus('salesforce', 'healthy', {
+      open_tickets: metrics.openTickets,
+      mttr_minutes: metrics.mttr.overall,
+      sla_compliance: metrics.slaComplianceRate,
+      escalation_rate: metrics.escalationRate,
+    });
+
     return { platform: 'salesforce', status: 'success', recordsSynced };
   }
 

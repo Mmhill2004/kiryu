@@ -1,57 +1,112 @@
 import type { Env } from '../../types/env';
 
-interface SalesforceToken {
-  access_token: string;
-  instance_url: string;
-  expires_at: number;
-}
-
 interface SalesforceCase {
   Id: string;
   CaseNumber: string;
-  Subject: string;
-  Description: string;
+  Subject: string | null;
+  Description: string | null;
   Status: string;
-  Priority: string;
-  Type: string;
+  Priority: string | null;
+  Type: string | null;
+  Reason: string | null;
+  Origin: string | null;
+  IsClosed: boolean;
+  IsEscalated: boolean;
   CreatedDate: string;
   ClosedDate: string | null;
   OwnerId: string;
-  ContactId: string;
+  Owner?: { Name: string };
+  ContactId: string | null;
+  Contact?: { Name: string } | null;
+  AccountId: string | null;
+  Account?: { Name: string } | null;
 }
 
-interface CaseMetrics {
-  totalCases: number;
-  openCases: number;
-  closedCases: number;
-  avgResolutionHours: number;
-  byPriority: Record<string, number>;
-  byStatus: Record<string, number>;
+interface PriorityCount {
+  Priority: string | null;
+  cnt: number;
+}
+
+interface OriginCount {
+  Origin: string | null;
+  cnt: number;
+}
+
+interface OwnerCount {
+  ownerName: string;
+  cnt: number;
+}
+
+interface CountResult {
+  cnt: number;
+}
+
+export interface TicketMetrics {
+  openTickets: number;
+  ticketsByPriority: Record<string, number>;
+  ticketsByOrigin: Record<string, number>;
+  mttr: {
+    overall: number;
+    byPriority: Record<string, number>;
+  };
+  escalationRate: number;
+  slaComplianceRate: number;
+  backlogAging: {
+    avgAgeHours: number;
+    agingBuckets: Record<string, number>;
+    oldestTicket: { caseNumber: string; subject: string; ageHours: number } | null;
+  };
+  weekOverWeek: {
+    thisWeek: number;
+    lastWeek: number;
+    changePercent: number;
+  };
+  agentWorkload: { name: string; count: number }[];
+  recentTickets: Array<{
+    id: string;
+    caseNumber: string;
+    subject: string | null;
+    priority: string | null;
+    status: string;
+    createdDate: string;
+    ownerName: string | null;
+  }>;
+  fetchedAt: string;
 }
 
 export class SalesforceClient {
-  private token: SalesforceToken | null = null;
+  private accessToken: string | null = null;
+  private tokenExpiry: number = 0;
+  private instanceUrl: string | null = null;
+  private readonly apiVersion = 'v59.0';
 
   constructor(private env: Env) {}
 
   /**
-   * Authenticate using OAuth2 Username-Password flow
-   * For production, consider using JWT Bearer flow
+   * Check if Salesforce is configured
    */
-  private async authenticate(): Promise<SalesforceToken> {
-    if (this.token && this.token.expires_at > Date.now()) {
-      return this.token;
+  isConfigured(): boolean {
+    return !!(
+      this.env.SALESFORCE_INSTANCE_URL &&
+      this.env.SALESFORCE_CLIENT_ID &&
+      this.env.SALESFORCE_CLIENT_SECRET
+    );
+  }
+
+  /**
+   * Get OAuth access token using Client Credentials flow
+   */
+  private async getAccessToken(): Promise<string> {
+    // Return cached token if valid
+    if (this.accessToken && Date.now() < this.tokenExpiry) {
+      return this.accessToken;
     }
 
-    // For JWT Bearer flow (recommended for server-to-server)
-    // You would need to implement JWT signing here
-    // This example uses the simpler client credentials flow
-    
-    const loginUrl = this.env.SALESFORCE_INSTANCE_URL.includes('sandbox')
-      ? 'https://test.salesforce.com'
-      : 'https://login.salesforce.com';
+    // Use instance URL directly for My Domain orgs (most common now)
+    // Remove trailing slash if present
+    const instanceUrl = this.env.SALESFORCE_INSTANCE_URL.replace(/\/$/, '');
 
-    const response = await fetch(`${loginUrl}/services/oauth2/token`, {
+    const response = await fetch(`${instanceUrl}/services/oauth2/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -65,238 +120,371 @@ export class SalesforceClient {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Salesforce authentication failed: ${error}`);
+      throw new Error(`Salesforce authentication failed: ${response.status} - ${error}`);
     }
 
-    const data = await response.json() as { 
-      access_token: string; 
+    const data = (await response.json()) as {
+      access_token: string;
       instance_url: string;
-      issued_at: string;
+      expires_in?: number;
+      issued_at?: string;
     };
 
-    this.token = {
-      access_token: data.access_token,
-      instance_url: data.instance_url,
-      expires_at: Date.now() + (2 * 60 * 60 * 1000), // 2 hour expiry
-    };
+    this.accessToken = data.access_token;
+    this.instanceUrl = data.instance_url || this.env.SALESFORCE_INSTANCE_URL;
+    // Refresh 60 seconds before expiry (default 2 hours)
+    this.tokenExpiry = Date.now() + ((data.expires_in || 7200) - 60) * 1000;
 
-    return this.token;
+    return this.accessToken;
   }
 
   /**
-   * Execute SOQL query
+   * Get the instance URL (after authentication)
    */
-  private async query<T>(soql: string): Promise<T[]> {
-    const token = await this.authenticate();
-    const encodedQuery = encodeURIComponent(soql);
+  private getInstanceUrl(): string {
+    return this.instanceUrl || this.env.SALESFORCE_INSTANCE_URL;
+  }
 
-    const response = await fetch(
-      `${token.instance_url}/services/data/v59.0/query/?q=${encodedQuery}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+  /**
+   * Execute a SOQL query
+   */
+  async query<T>(soql: string): Promise<T[]> {
+    const token = await this.getAccessToken();
+    const url = `${this.getInstanceUrl()}/services/data/${this.apiVersion}/query?q=${encodeURIComponent(soql)}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Salesforce query failed: ${error}`);
+      throw new Error(`SOQL query failed: ${response.status} - ${error}`);
     }
 
-    const data = await response.json() as { records: T[]; totalSize: number };
+    const data = (await response.json()) as { records: T[]; totalSize: number; done: boolean };
     return data.records;
   }
 
   /**
    * Get security-related tickets
-   * Filters by record type or custom field if configured
    */
-  async getSecurityTickets(days = 30): Promise<SalesforceCase[]> {
-    const dateFilter = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0];
-
-    // Customize this query based on your Salesforce setup
-    // You might filter by RecordType, custom fields, or specific queues
+  async getSecurityTickets(days: number = 30, limit: number = 2000): Promise<SalesforceCase[]> {
     const soql = `
-      SELECT 
-        Id, CaseNumber, Subject, Description, Status, Priority, Type,
-        CreatedDate, ClosedDate, OwnerId, ContactId
+      SELECT
+        Id, CaseNumber, Subject, Description, Status, Priority,
+        Type, Reason, Origin, IsClosed, IsEscalated,
+        CreatedDate, ClosedDate, OwnerId, Owner.Name,
+        ContactId, Contact.Name, AccountId, Account.Name
       FROM Case
-      WHERE CreatedDate >= ${dateFilter}
-        AND (
-          Type = 'Security'
-          OR Subject LIKE '%security%'
-          OR Subject LIKE '%incident%'
-          OR Subject LIKE '%breach%'
-          OR Subject LIKE '%malware%'
-          OR Subject LIKE '%phishing%'
-        )
+      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%'
+             OR Subject LIKE '%breach%' OR Subject LIKE '%malware%' OR Subject LIKE '%phishing%')
+        AND CreatedDate >= LAST_N_DAYS:${days}
       ORDER BY CreatedDate DESC
-      LIMIT 500
+      LIMIT ${limit}
     `;
-
-    try {
-      return await this.query<SalesforceCase>(soql);
-    } catch (error) {
-      console.warn('Failed to get security tickets:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get all open cases
-   */
-  async getOpenCases(): Promise<SalesforceCase[]> {
-    const soql = `
-      SELECT 
-        Id, CaseNumber, Subject, Status, Priority, CreatedDate, OwnerId
-      FROM Case
-      WHERE IsClosed = false
-      ORDER BY Priority DESC, CreatedDate ASC
-      LIMIT 200
-    `;
-
     return this.query<SalesforceCase>(soql);
   }
 
   /**
-   * Get case metrics
+   * Get open tickets grouped by priority
    */
-  async getCaseMetrics(days = 30): Promise<CaseMetrics> {
-    const dateFilter = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0];
-
-    // Get case counts by status
-    const statusQuery = `
-      SELECT Status, COUNT(Id) cnt
-      FROM Case
-      WHERE CreatedDate >= ${dateFilter}
-      GROUP BY Status
-    `;
-
-    // Get case counts by priority
-    const priorityQuery = `
+  async getOpenTicketsByPriority(): Promise<PriorityCount[]> {
+    const soql = `
       SELECT Priority, COUNT(Id) cnt
       FROM Case
-      WHERE CreatedDate >= ${dateFilter}
+      WHERE IsClosed = false
+        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
       GROUP BY Priority
     `;
-
-    // Get closed cases with resolution time
-    const resolutionQuery = `
-      SELECT Id, CreatedDate, ClosedDate
-      FROM Case
-      WHERE CreatedDate >= ${dateFilter}
-        AND IsClosed = true
-        AND ClosedDate != null
-      LIMIT 1000
-    `;
-
-    try {
-      const [statusResults, priorityResults, closedCases] = await Promise.all([
-        this.query<{ Status: string; cnt: number }>(statusQuery),
-        this.query<{ Priority: string; cnt: number }>(priorityQuery),
-        this.query<{ Id: string; CreatedDate: string; ClosedDate: string }>(resolutionQuery),
-      ]);
-
-      // Calculate metrics
-      const byStatus: Record<string, number> = {};
-      let totalCases = 0;
-      let openCases = 0;
-      let closedCount = 0;
-
-      for (const row of statusResults) {
-        byStatus[row.Status] = row.cnt;
-        totalCases += row.cnt;
-        if (row.Status === 'Closed') {
-          closedCount = row.cnt;
-        } else {
-          openCases += row.cnt;
-        }
-      }
-
-      const byPriority: Record<string, number> = {};
-      for (const row of priorityResults) {
-        byPriority[row.Priority] = row.cnt;
-      }
-
-      // Calculate average resolution time
-      let totalResolutionHours = 0;
-      for (const case_ of closedCases) {
-        const created = new Date(case_.CreatedDate).getTime();
-        const closed = new Date(case_.ClosedDate).getTime();
-        totalResolutionHours += (closed - created) / (1000 * 60 * 60);
-      }
-
-      const avgResolutionHours = closedCases.length > 0
-        ? totalResolutionHours / closedCases.length
-        : 0;
-
-      return {
-        totalCases,
-        openCases,
-        closedCases: closedCount,
-        avgResolutionHours: Math.round(avgResolutionHours * 10) / 10,
-        byPriority,
-        byStatus,
-      };
-    } catch (error) {
-      console.warn('Failed to get case metrics:', error);
-      return {
-        totalCases: 0,
-        openCases: 0,
-        closedCases: 0,
-        avgResolutionHours: 0,
-        byPriority: {},
-        byStatus: {},
-      };
-    }
+    return this.query<PriorityCount>(soql);
   }
 
   /**
-   * Get SLA compliance metrics
+   * Get tickets grouped by origin/channel
    */
-  async getSLACompliance(): Promise<{
-    totalCases: number;
-    withinSLA: number;
-    breachedSLA: number;
-    complianceRate: number;
-  }> {
-    // This assumes you have SLA fields on your Case object
-    // Adjust the query based on your Salesforce configuration
+  async getTicketsByOrigin(days: number = 30): Promise<OriginCount[]> {
     const soql = `
-      SELECT 
-        COUNT(Id) total,
-        SUM(CASE WHEN IsClosed = true AND ClosedDate <= SLA_Due_Date__c THEN 1 ELSE 0 END) within_sla
+      SELECT Origin, COUNT(Id) cnt
       FROM Case
-      WHERE CreatedDate >= LAST_N_DAYS:30
-        AND SLA_Due_Date__c != null
+      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+        AND CreatedDate >= LAST_N_DAYS:${days}
+      GROUP BY Origin
     `;
+    return this.query<OriginCount>(soql);
+  }
 
+  /**
+   * Get closed tickets for MTTR calculation
+   */
+  async getClosedTickets(days: number = 30): Promise<SalesforceCase[]> {
+    const soql = `
+      SELECT Id, CaseNumber, Priority, CreatedDate, ClosedDate
+      FROM Case
+      WHERE IsClosed = true
+        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+        AND ClosedDate >= LAST_N_DAYS:${days}
+    `;
+    return this.query<SalesforceCase>(soql);
+  }
+
+  /**
+   * Get open tickets for backlog aging
+   */
+  async getOpenTickets(): Promise<SalesforceCase[]> {
+    const soql = `
+      SELECT Id, CaseNumber, Subject, Priority, Status, CreatedDate, Owner.Name
+      FROM Case
+      WHERE IsClosed = false
+        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+      ORDER BY CreatedDate ASC
+    `;
+    return this.query<SalesforceCase>(soql);
+  }
+
+  /**
+   * Get ticket count for a date range
+   */
+  async getTicketCount(dateFilter: string): Promise<number> {
+    const soql = `
+      SELECT COUNT(Id) cnt
+      FROM Case
+      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+        AND CreatedDate = ${dateFilter}
+    `;
+    const result = await this.query<CountResult>(soql);
+    return result[0]?.cnt || 0;
+  }
+
+  /**
+   * Get escalated ticket count
+   */
+  async getEscalatedCount(days: number = 30): Promise<number> {
+    const soql = `
+      SELECT COUNT(Id) cnt
+      FROM Case
+      WHERE IsEscalated = true
+        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+        AND CreatedDate >= LAST_N_DAYS:${days}
+    `;
+    const result = await this.query<CountResult>(soql);
+    return result[0]?.cnt || 0;
+  }
+
+  /**
+   * Get agent workload (open tickets per owner)
+   */
+  async getAgentWorkload(): Promise<OwnerCount[]> {
+    const soql = `
+      SELECT Owner.Name ownerName, COUNT(Id) cnt
+      FROM Case
+      WHERE IsClosed = false
+        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
+             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
+      GROUP BY Owner.Name
+      ORDER BY COUNT(Id) DESC
+    `;
+    return this.query<OwnerCount>(soql);
+  }
+
+  /**
+   * Calculate MTTR from closed tickets
+   */
+  calculateMTTR(tickets: SalesforceCase[]): {
+    overall: number;
+    byPriority: Record<string, number>;
+  } {
+    const byPriority: Record<string, number[]> = {};
+    const allTimes: number[] = [];
+
+    for (const ticket of tickets) {
+      if (!ticket.ClosedDate) continue;
+
+      const created = new Date(ticket.CreatedDate).getTime();
+      const closed = new Date(ticket.ClosedDate).getTime();
+      const resolutionMinutes = (closed - created) / (1000 * 60);
+
+      allTimes.push(resolutionMinutes);
+
+      const priority = ticket.Priority || 'None';
+      if (!byPriority[priority]) byPriority[priority] = [];
+      byPriority[priority].push(resolutionMinutes);
+    }
+
+    const avg = (arr: number[]) =>
+      arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+    return {
+      overall: avg(allTimes),
+      byPriority: Object.fromEntries(
+        Object.entries(byPriority).map(([k, v]) => [k, avg(v)])
+      ),
+    };
+  }
+
+  /**
+   * Calculate backlog aging metrics
+   */
+  calculateBacklogAging(tickets: SalesforceCase[]): {
+    avgAgeHours: number;
+    agingBuckets: Record<string, number>;
+    oldestTicket: { caseNumber: string; subject: string; ageHours: number } | null;
+  } {
+    const now = Date.now();
+    const ages = tickets.map((t) => ({
+      caseNumber: t.CaseNumber,
+      subject: t.Subject || '(No Subject)',
+      ageHours: (now - new Date(t.CreatedDate).getTime()) / (1000 * 60 * 60),
+    }));
+
+    const buckets = {
+      '<24h': 0,
+      '24-48h': 0,
+      '48-72h': 0,
+      '>72h': 0,
+    };
+
+    for (const age of ages) {
+      if (age.ageHours < 24) buckets['<24h']++;
+      else if (age.ageHours < 48) buckets['24-48h']++;
+      else if (age.ageHours < 72) buckets['48-72h']++;
+      else buckets['>72h']++;
+    }
+
+    const avgAgeHours = ages.length
+      ? ages.reduce((a, b) => a + b.ageHours, 0) / ages.length
+      : 0;
+
+    const first = ages[0];
+    const oldestTicket: { caseNumber: string; subject: string; ageHours: number } | null =
+      first ?? null;
+
+    return {
+      avgAgeHours,
+      agingBuckets: buckets,
+      oldestTicket,
+    };
+  }
+
+  /**
+   * Get comprehensive dashboard metrics
+   */
+  async getDashboardMetrics(): Promise<TicketMetrics> {
+    // Execute all queries in parallel
+    const [
+      priorityData,
+      originData,
+      closedTickets,
+      openTickets,
+      escalatedCount,
+      thisWeekCount,
+      lastWeekCount,
+      agentWorkload,
+    ] = await Promise.all([
+      this.getOpenTicketsByPriority(),
+      this.getTicketsByOrigin(30),
+      this.getClosedTickets(30),
+      this.getOpenTickets(),
+      this.getEscalatedCount(30),
+      this.getTicketCount('THIS_WEEK'),
+      this.getTicketCount('LAST_WEEK'),
+      this.getAgentWorkload(),
+    ]);
+
+    // Calculate derived metrics
+    const ticketsByPriority: Record<string, number> = {};
+    let totalOpen = 0;
+    for (const p of priorityData) {
+      const key = p.Priority || 'None';
+      ticketsByPriority[key] = p.cnt;
+      totalOpen += p.cnt;
+    }
+
+    const ticketsByOrigin: Record<string, number> = {};
+    for (const o of originData) {
+      ticketsByOrigin[o.Origin || 'Unknown'] = o.cnt;
+    }
+
+    const mttr = this.calculateMTTR(closedTickets);
+    const backlogAging = this.calculateBacklogAging(openTickets);
+
+    // Total tickets in period for escalation rate
+    const totalInPeriod = closedTickets.length + openTickets.length;
+    const escalationRate = totalInPeriod > 0 ? (escalatedCount / totalInPeriod) * 100 : 0;
+
+    // Week over week change
+    const weekOverWeekChange =
+      lastWeekCount > 0 ? ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100 : 0;
+
+    // SLA compliance (estimate based on MTTR vs 4-hour target)
+    const slaTarget = 240; // 4 hours in minutes
+    const ticketsMetSLA = closedTickets.filter((t) => {
+      if (!t.ClosedDate) return false;
+      const resolution =
+        (new Date(t.ClosedDate).getTime() - new Date(t.CreatedDate).getTime()) / (1000 * 60);
+      return resolution <= slaTarget;
+    }).length;
+    const slaComplianceRate =
+      closedTickets.length > 0 ? (ticketsMetSLA / closedTickets.length) * 100 : 100;
+
+    // Get recent tickets for the table
+    const recentTickets = openTickets.slice(0, 10).map((t) => ({
+      id: t.Id,
+      caseNumber: t.CaseNumber,
+      subject: t.Subject,
+      priority: t.Priority,
+      status: t.Status,
+      createdDate: t.CreatedDate,
+      ownerName: t.Owner?.Name || null,
+    }));
+
+    return {
+      openTickets: totalOpen,
+      ticketsByPriority,
+      ticketsByOrigin,
+      mttr,
+      escalationRate,
+      slaComplianceRate,
+      backlogAging,
+      weekOverWeek: {
+        thisWeek: thisWeekCount,
+        lastWeek: lastWeekCount,
+        changePercent: weekOverWeekChange,
+      },
+      agentWorkload: agentWorkload.map((a) => ({
+        name: a.ownerName,
+        count: a.cnt,
+      })),
+      recentTickets,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Test the connection to Salesforce
+   */
+  async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const results = await this.query<{ total: number; within_sla: number }>(soql);
-      const data = results[0] || { total: 0, within_sla: 0 };
-      
+      await this.getAccessToken();
+      // Try a simple query to verify API access
+      const result = await this.query<{ Id: string }>('SELECT Id FROM Case LIMIT 1');
       return {
-        totalCases: data.total,
-        withinSLA: data.within_sla,
-        breachedSLA: data.total - data.within_sla,
-        complianceRate: data.total > 0 
-          ? Math.round((data.within_sla / data.total) * 100) 
-          : 100,
+        success: true,
+        message: `Connected successfully. Found ${result.length} case(s).`,
       };
     } catch (error) {
-      // SLA fields might not exist
-      console.warn('SLA fields not configured:', error);
       return {
-        totalCases: 0,
-        withinSLA: 0,
-        breachedSLA: 0,
-        complianceRate: 100,
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }

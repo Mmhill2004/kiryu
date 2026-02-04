@@ -5,6 +5,7 @@ import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
 import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, ZTASummary } from '../integrations/crowdstrike/client';
+import type { TicketMetrics } from '../integrations/salesforce/client';
 
 interface DashboardData {
   crowdstrike: {
@@ -15,6 +16,7 @@ interface DashboardData {
     zta: ZTASummary;
     fetchedAt: string;
   } | null;
+  salesforce: TicketMetrics | null;
   platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -35,8 +37,15 @@ const periodLabels: Record<string, string> = {
   '90d': 'Last 90 Days',
 };
 
+// Helper to format minutes to human readable
+const formatDuration = (minutes: number): string => {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  if (minutes < 1440) return `${(minutes / 60).toFixed(1)}h`;
+  return `${(minutes / 1440).toFixed(1)}d`;
+};
+
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, platforms, period, lastUpdated } = data;
+  const { crowdstrike, salesforce, platforms, period, lastUpdated } = data;
 
   // Calculate security score from CrowdStrike data
   let securityScore = 100;
@@ -64,7 +73,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </svg>
           <div>
             <h1>Security Dashboard</h1>
-            <p>CrowdStrike Falcon + Security Operations</p>
+            <p>CrowdStrike Falcon + Salesforce Service Cloud</p>
           </div>
         </div>
 
@@ -93,205 +102,357 @@ export const Dashboard: FC<Props> = ({ data }) => {
         </div>
       </header>
 
-      {!crowdstrike ? (
+      {!crowdstrike && !salesforce ? (
         <div class="error-banner">
-          CrowdStrike not configured or unable to fetch data. Check your API credentials.
+          No platforms configured. Configure CrowdStrike or Salesforce credentials to see data.
         </div>
       ) : (
         <>
           {/* Main Grid */}
           <div class="grid">
             {/* Row 1: Security Score + Host Overview */}
-            <div class="card col-3">
-              <div class="card-title">Security Score</div>
-              <SecurityScore score={securityScore} />
-            </div>
-
-            <div class="col-9">
-              <div class="card-title" style="margin-bottom: 1rem;">Endpoint Overview</div>
-              <div class="metric-grid">
-                <MetricCard
-                  label="Total Endpoints"
-                  value={crowdstrike.hosts.total}
-                />
-                <MetricCard
-                  label="Online"
-                  value={crowdstrike.hosts.online}
-                  severity={crowdstrike.hosts.online > 0 ? undefined : 'medium'}
-                />
-                <MetricCard
-                  label="Contained"
-                  value={crowdstrike.hosts.contained}
-                  severity={crowdstrike.hosts.contained > 0 ? 'critical' : undefined}
-                />
-                <MetricCard
-                  label="Stale (7+ days)"
-                  value={crowdstrike.hosts.staleEndpoints}
-                  severity={crowdstrike.hosts.staleEndpoints > 0 ? 'medium' : undefined}
-                />
-              </div>
-            </div>
-
-            {/* Row 2: Alerts by Severity */}
-            <div class="col-12">
-              <div class="card-title" style="margin-bottom: 1rem;">Active Alerts</div>
-              <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
-                <MetricCard
-                  label="Critical"
-                  value={crowdstrike.alerts.bySeverity.critical}
-                  severity="critical"
-                />
-                <MetricCard
-                  label="High"
-                  value={crowdstrike.alerts.bySeverity.high}
-                  severity="high"
-                />
-                <MetricCard
-                  label="Medium"
-                  value={crowdstrike.alerts.bySeverity.medium}
-                  severity="medium"
-                />
-                <MetricCard
-                  label="Low"
-                  value={crowdstrike.alerts.bySeverity.low}
-                  severity="low"
-                />
-                <MetricCard
-                  label="Informational"
-                  value={crowdstrike.alerts.bySeverity.informational}
-                />
-              </div>
-            </div>
-
-            {/* Row 3: Incidents + Vulnerabilities + ZTA */}
-            <div class="card col-4">
-              <div class="card-title">Incidents</div>
-              <div class="stat-row">
-                <span class="stat-label">Open</span>
-                <span class="stat-value">{crowdstrike.incidents.open}</span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">Closed</span>
-                <span class="stat-value">{crowdstrike.incidents.closed}</span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">With Lateral Movement</span>
-                <span class="stat-value severity-critical">{crowdstrike.incidents.withLateralMovement}</span>
-              </div>
-              {crowdstrike.incidents.mttr && (
-                <div class="stat-row">
-                  <span class="stat-label">MTTR</span>
-                  <span class="stat-value">{crowdstrike.incidents.mttr}h</span>
+            {crowdstrike && (
+              <>
+                <div class="card col-3">
+                  <div class="card-title">Security Score</div>
+                  <SecurityScore score={securityScore} />
                 </div>
-              )}
-              <div class="stat-row">
-                <span class="stat-label">Avg Fine Score</span>
-                <span class="stat-value">{crowdstrike.incidents.avgFineScore}</span>
+
+                <div class="col-9">
+                  <div class="card-title" style="margin-bottom: 1rem;">Endpoint Overview</div>
+                  <div class="metric-grid">
+                    <MetricCard
+                      label="Total Endpoints"
+                      value={crowdstrike.hosts.total}
+                    />
+                    <MetricCard
+                      label="Online"
+                      value={crowdstrike.hosts.online}
+                      severity={crowdstrike.hosts.online > 0 ? undefined : 'medium'}
+                    />
+                    <MetricCard
+                      label="Contained"
+                      value={crowdstrike.hosts.contained}
+                      severity={crowdstrike.hosts.contained > 0 ? 'critical' : undefined}
+                    />
+                    <MetricCard
+                      label="Stale (7+ days)"
+                      value={crowdstrike.hosts.staleEndpoints}
+                      severity={crowdstrike.hosts.staleEndpoints > 0 ? 'medium' : undefined}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Row 2: Alerts by Severity (CrowdStrike) */}
+            {crowdstrike && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">Active Alerts</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                  <MetricCard
+                    label="Critical"
+                    value={crowdstrike.alerts.bySeverity.critical}
+                    severity="critical"
+                  />
+                  <MetricCard
+                    label="High"
+                    value={crowdstrike.alerts.bySeverity.high}
+                    severity="high"
+                  />
+                  <MetricCard
+                    label="Medium"
+                    value={crowdstrike.alerts.bySeverity.medium}
+                    severity="medium"
+                  />
+                  <MetricCard
+                    label="Low"
+                    value={crowdstrike.alerts.bySeverity.low}
+                    severity="low"
+                  />
+                  <MetricCard
+                    label="Informational"
+                    value={crowdstrike.alerts.bySeverity.informational}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
-            <div class="card col-4">
-              <div class="card-title">Vulnerabilities (Spotlight)</div>
-              {crowdstrike.vulnerabilities.total > 0 ? (
-                <>
-                  <div class="stat-row">
-                    <span class="stat-label">Critical</span>
-                    <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.bySeverity.critical}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">High</span>
-                    <span class="stat-value severity-high">{crowdstrike.vulnerabilities.bySeverity.high}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">With Exploits</span>
-                    <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.withExploits}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">Affected Hosts</span>
-                    <span class="stat-value">{crowdstrike.vulnerabilities.affectedHosts}</span>
-                  </div>
-                </>
-              ) : (
-                <p class="no-data">No vulnerability data (Spotlight not licensed or no vulns)</p>
-              )}
-            </div>
+            {/* Row 3: Salesforce Service Desk KPIs */}
+            {salesforce && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">Service Desk Metrics</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                  <MetricCard
+                    label="Open Tickets"
+                    value={salesforce.openTickets}
+                    severity={salesforce.openTickets > 10 ? 'high' : salesforce.openTickets > 5 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="MTTR"
+                    value={formatDuration(salesforce.mttr.overall)}
+                    severity={salesforce.mttr.overall > 240 ? 'high' : salesforce.mttr.overall > 120 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="SLA Compliance"
+                    value={`${salesforce.slaComplianceRate.toFixed(0)}%`}
+                    severity={salesforce.slaComplianceRate < 90 ? 'critical' : salesforce.slaComplianceRate < 95 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="Escalation Rate"
+                    value={`${salesforce.escalationRate.toFixed(1)}%`}
+                    severity={salesforce.escalationRate > 15 ? 'high' : salesforce.escalationRate > 10 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="Backlog Age"
+                    value={`${salesforce.backlogAging.avgAgeHours.toFixed(0)}h`}
+                    severity={salesforce.backlogAging.avgAgeHours > 72 ? 'critical' : salesforce.backlogAging.avgAgeHours > 48 ? 'medium' : undefined}
+                  />
+                  <MetricCard
+                    label="Week Trend"
+                    value={`${salesforce.weekOverWeek.changePercent >= 0 ? '+' : ''}${salesforce.weekOverWeek.changePercent.toFixed(0)}%`}
+                    severity={salesforce.weekOverWeek.changePercent > 20 ? 'high' : salesforce.weekOverWeek.changePercent > 10 ? 'medium' : undefined}
+                  />
+                </div>
+              </div>
+            )}
 
-            <div class="card col-4">
-              <div class="card-title">Zero Trust Assessment</div>
-              {crowdstrike.zta.totalAssessed > 0 ? (
-                <>
+            {/* Row 4: CrowdStrike Details */}
+            {crowdstrike && (
+              <>
+                <div class="card col-4">
+                  <div class="card-title">Incidents</div>
                   <div class="stat-row">
-                    <span class="stat-label">Avg Score</span>
-                    <span class="stat-value">{crowdstrike.zta.avgScore}/100</span>
+                    <span class="stat-label">Open</span>
+                    <span class="stat-value">{crowdstrike.incidents.open}</span>
                   </div>
                   <div class="stat-row">
-                    <span class="stat-label">Excellent (80+)</span>
-                    <span class="stat-value">{crowdstrike.zta.scoreDistribution.excellent}</span>
+                    <span class="stat-label">Closed</span>
+                    <span class="stat-value">{crowdstrike.incidents.closed}</span>
                   </div>
                   <div class="stat-row">
-                    <span class="stat-label">Good (60-79)</span>
-                    <span class="stat-value">{crowdstrike.zta.scoreDistribution.good}</span>
+                    <span class="stat-label">With Lateral Movement</span>
+                    <span class="stat-value severity-critical">{crowdstrike.incidents.withLateralMovement}</span>
                   </div>
+                  {crowdstrike.incidents.mttr && (
+                    <div class="stat-row">
+                      <span class="stat-label">MTTR</span>
+                      <span class="stat-value">{crowdstrike.incidents.mttr}h</span>
+                    </div>
+                  )}
                   <div class="stat-row">
-                    <span class="stat-label">Fair (40-59)</span>
-                    <span class="stat-value severity-medium">{crowdstrike.zta.scoreDistribution.fair}</span>
+                    <span class="stat-label">Avg Fine Score</span>
+                    <span class="stat-value">{crowdstrike.incidents.avgFineScore}</span>
                   </div>
-                  <div class="stat-row">
-                    <span class="stat-label">Poor (&lt;40)</span>
-                    <span class="stat-value severity-critical">{crowdstrike.zta.scoreDistribution.poor}</span>
-                  </div>
-                </>
-              ) : (
-                <p class="no-data">No ZTA data available</p>
-              )}
-            </div>
+                </div>
 
-            {/* Row 4: MITRE ATT&CK Tactics + Platform by OS + Platform Status */}
-            <div class="card col-4">
-              <div class="card-title">Top MITRE ATT&CK Tactics</div>
-              {Object.keys(crowdstrike.alerts.byTactic).length > 0 ? (
-                <div class="tactic-list">
-                  {Object.entries(crowdstrike.alerts.byTactic)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 5)
-                    .map(([tactic, count]) => (
-                      <div class="stat-row" key={tactic}>
-                        <span class="stat-label">{tactic}</span>
-                        <span class="stat-value">{count}</span>
+                <div class="card col-4">
+                  <div class="card-title">Vulnerabilities (Spotlight)</div>
+                  {crowdstrike.vulnerabilities.total > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Critical</span>
+                        <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.bySeverity.critical}</span>
                       </div>
-                    ))}
+                      <div class="stat-row">
+                        <span class="stat-label">High</span>
+                        <span class="stat-value severity-high">{crowdstrike.vulnerabilities.bySeverity.high}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">With Exploits</span>
+                        <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.withExploits}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Affected Hosts</span>
+                        <span class="stat-value">{crowdstrike.vulnerabilities.affectedHosts}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p class="no-data">No vulnerability data (Spotlight not licensed or no vulns)</p>
+                  )}
                 </div>
-              ) : (
-                <p class="no-data">No tactics detected</p>
-              )}
-            </div>
 
-            <div class="card col-4">
-              <div class="card-title">Endpoints by Platform</div>
-              <ThreatChart
-                data={{
-                  endpoint: crowdstrike.hosts.byPlatform.windows,
-                  email: crowdstrike.hosts.byPlatform.mac,
-                  web: crowdstrike.hosts.byPlatform.linux,
-                  cloud: 0,
-                }}
-                labels={{
-                  endpoint: 'Windows',
-                  email: 'macOS',
-                  web: 'Linux',
-                }}
-              />
-            </div>
+                <div class="card col-4">
+                  <div class="card-title">Zero Trust Assessment</div>
+                  {crowdstrike.zta.totalAssessed > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Avg Score</span>
+                        <span class="stat-value">{crowdstrike.zta.avgScore}/100</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Excellent (80+)</span>
+                        <span class="stat-value">{crowdstrike.zta.scoreDistribution.excellent}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Good (60-79)</span>
+                        <span class="stat-value">{crowdstrike.zta.scoreDistribution.good}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Fair (40-59)</span>
+                        <span class="stat-value severity-medium">{crowdstrike.zta.scoreDistribution.fair}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Poor (&lt;40)</span>
+                        <span class="stat-value severity-critical">{crowdstrike.zta.scoreDistribution.poor}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p class="no-data">No ZTA data available</p>
+                  )}
+                </div>
+              </>
+            )}
 
-            <div class="card col-4">
+            {/* Row 5: Salesforce Details */}
+            {salesforce && (
+              <>
+                <div class="card col-4">
+                  <div class="card-title">Tickets by Priority</div>
+                  {Object.keys(salesforce.ticketsByPriority).length > 0 ? (
+                    <div>
+                      {Object.entries(salesforce.ticketsByPriority)
+                        .sort((a, b) => {
+                          const order = ['High', 'Medium', 'Low', 'None'];
+                          return order.indexOf(a[0]) - order.indexOf(b[0]);
+                        })
+                        .map(([priority, count]) => (
+                          <div class="stat-row" key={priority}>
+                            <span class="stat-label">{priority}</span>
+                            <span class={`stat-value ${priority === 'High' ? 'severity-critical' : priority === 'Medium' ? 'severity-medium' : ''}`}>
+                              {count}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No open tickets</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Backlog Aging</div>
+                  {Object.keys(salesforce.backlogAging.agingBuckets).length > 0 ? (
+                    <div>
+                      {Object.entries(salesforce.backlogAging.agingBuckets).map(([bucket, count]) => (
+                        <div class="stat-row" key={bucket}>
+                          <span class="stat-label">{bucket}</span>
+                          <span class={`stat-value ${bucket === '>72h' ? 'severity-critical' : bucket === '48-72h' ? 'severity-high' : ''}`}>
+                            {count}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No backlog data</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Agent Workload</div>
+                  {salesforce.agentWorkload.length > 0 ? (
+                    <div>
+                      {salesforce.agentWorkload.slice(0, 5).map((agent) => (
+                        <div class="stat-row" key={agent.name}>
+                          <span class="stat-label">{agent.name}</span>
+                          <span class={`stat-value ${agent.count > 5 ? 'severity-high' : agent.count > 3 ? 'severity-medium' : ''}`}>
+                            {agent.count}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No workload data</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Row 6: MITRE ATT&CK Tactics + Platform by OS + Platform Status */}
+            {crowdstrike && (
+              <>
+                <div class="card col-4">
+                  <div class="card-title">Top MITRE ATT&CK Tactics</div>
+                  {Object.keys(crowdstrike.alerts.byTactic).length > 0 ? (
+                    <div class="tactic-list">
+                      {Object.entries(crowdstrike.alerts.byTactic)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([tactic, count]) => (
+                          <div class="stat-row" key={tactic}>
+                            <span class="stat-label">{tactic}</span>
+                            <span class="stat-value">{count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p class="no-data">No tactics detected</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Endpoints by Platform</div>
+                  <ThreatChart
+                    data={{
+                      endpoint: crowdstrike.hosts.byPlatform.windows,
+                      email: crowdstrike.hosts.byPlatform.mac,
+                      web: crowdstrike.hosts.byPlatform.linux,
+                      cloud: 0,
+                    }}
+                    labels={{
+                      endpoint: 'Windows',
+                      email: 'macOS',
+                      web: 'Linux',
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            <div class={`card ${crowdstrike ? 'col-4' : 'col-12'}`}>
               <div class="card-title">Platform Status</div>
               <PlatformStatus platforms={platforms} />
             </div>
 
-            {/* Row 5: Recent Alerts */}
-            <div class="card col-12">
-              <div class="card-title">Recent Alerts</div>
-              {crowdstrike.alerts.recentAlerts.length > 0 ? (
+            {/* Row 7: Recent Security Tickets (Salesforce) */}
+            {salesforce && salesforce.recentTickets.length > 0 && (
+              <div class="card col-12">
+                <div class="card-title">Open Security Tickets</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Case #</th>
+                      <th>Subject</th>
+                      <th>Priority</th>
+                      <th>Status</th>
+                      <th>Owner</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salesforce.recentTickets.map((ticket) => (
+                      <tr key={ticket.id}>
+                        <td>{ticket.caseNumber}</td>
+                        <td>{ticket.subject?.slice(0, 50) || 'N/A'}{ticket.subject && ticket.subject.length > 50 ? '...' : ''}</td>
+                        <td>
+                          <span class={`badge badge-${ticket.priority?.toLowerCase() === 'high' ? 'critical' : ticket.priority?.toLowerCase() || 'medium'}`}>
+                            {ticket.priority || 'None'}
+                          </span>
+                        </td>
+                        <td style="text-transform: capitalize;">{ticket.status}</td>
+                        <td>{ticket.ownerName || 'Unassigned'}</td>
+                        <td>{new Date(ticket.createdDate).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Row 8: Recent Alerts (CrowdStrike) */}
+            {crowdstrike && crowdstrike.alerts.recentAlerts.length > 0 && (
+              <div class="card col-12">
+                <div class="card-title">Recent CrowdStrike Alerts</div>
                 <table>
                   <thead>
                     <tr>
@@ -320,10 +481,8 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     ))}
                   </tbody>
                 </table>
-              ) : (
-                <p class="no-data">No recent alerts</p>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -331,7 +490,8 @@ export const Dashboard: FC<Props> = ({ data }) => {
       {/* Footer */}
       <footer>
         <p>Last updated: {new Date(lastUpdated).toLocaleString()}</p>
-        {crowdstrike && <p>Data fetched from CrowdStrike Falcon at {new Date(crowdstrike.fetchedAt).toLocaleString()}</p>}
+        {crowdstrike && <p>CrowdStrike data fetched at {new Date(crowdstrike.fetchedAt).toLocaleString()}</p>}
+        {salesforce && <p>Salesforce data fetched at {new Date(salesforce.fetchedAt).toLocaleString()}</p>}
       </footer>
     </Layout>
   );

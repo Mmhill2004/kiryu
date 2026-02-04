@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
+import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 
 export const uiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -14,31 +15,40 @@ uiRoutes.get('/', async (c) => {
 
   // Initialize with defaults
   let crowdstrike = null;
+  let salesforce: TicketMetrics | null = null;
   let platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
     last_sync: string | null;
   }> = [];
 
-  // Fetch CrowdStrike data
+  // Fetch data from both platforms in parallel
   const csClient = new CrowdStrikeClient(c.env);
+  const sfClient = new SalesforceClient(c.env);
+
+  const fetchPromises: Promise<void>[] = [];
+
+  // CrowdStrike fetch
   if (csClient.isConfigured()) {
-    try {
-      crowdstrike = await csClient.getFullSummary(daysBack, 30);
-      // Update platform status
-      platforms.push({
-        platform: 'crowdstrike',
-        status: 'healthy',
-        last_sync: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error('CrowdStrike fetch error:', error);
-      platforms.push({
-        platform: 'crowdstrike',
-        status: 'error',
-        last_sync: null,
-      });
-    }
+    fetchPromises.push(
+      csClient.getFullSummary(daysBack, 30)
+        .then((data) => {
+          crowdstrike = data;
+          platforms.push({
+            platform: 'crowdstrike',
+            status: 'healthy',
+            last_sync: new Date().toISOString(),
+          });
+        })
+        .catch((error) => {
+          console.error('CrowdStrike fetch error:', error);
+          platforms.push({
+            platform: 'crowdstrike',
+            status: 'error',
+            last_sync: null,
+          });
+        })
+    );
   } else {
     platforms.push({
       platform: 'crowdstrike',
@@ -47,18 +57,50 @@ uiRoutes.get('/', async (c) => {
     });
   }
 
+  // Salesforce fetch
+  if (sfClient.isConfigured()) {
+    fetchPromises.push(
+      sfClient.getDashboardMetrics()
+        .then((data) => {
+          salesforce = data;
+          platforms.push({
+            platform: 'salesforce',
+            status: 'healthy',
+            last_sync: new Date().toISOString(),
+          });
+        })
+        .catch((error) => {
+          console.error('Salesforce fetch error:', error);
+          platforms.push({
+            platform: 'salesforce',
+            status: 'error',
+            last_sync: null,
+          });
+        })
+    );
+  } else {
+    platforms.push({
+      platform: 'salesforce',
+      status: 'not_configured',
+      last_sync: null,
+    });
+  }
+
+  // Wait for all fetches to complete
+  await Promise.all(fetchPromises);
+
   // Add other platforms as not configured for now
   platforms.push(
     { platform: 'abnormal', status: 'not_configured', last_sync: null },
     { platform: 'zscaler', status: 'not_configured', last_sync: null },
     { platform: 'microsoft', status: 'not_configured', last_sync: null },
-    { platform: 'salesforce', status: 'not_configured', last_sync: null },
   );
 
   return c.html(
     <Dashboard
       data={{
         crowdstrike,
+        salesforce,
         platforms,
         period,
         lastUpdated: new Date().toISOString(),
