@@ -871,12 +871,12 @@ export class CrowdStrikeClient {
 
   /**
    * Get full dashboard summary
+   * Note: Spotlight vulnerabilities removed - license not available
    */
   async getFullSummary(alertDays = 7, incidentDays = 30): Promise<{
     alerts: AlertSummary;
     hosts: HostSummary;
     incidents: IncidentSummary;
-    vulnerabilities: VulnerabilitySummary;
     zta: ZTASummary;
     fetchedAt: string;
     errors?: string[];
@@ -916,16 +916,6 @@ export class CrowdStrikeClient {
       recentIncidents: [],
     };
 
-    const defaultVulns: VulnerabilitySummary = {
-      total: 0,
-      bySeverity: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
-      byStatus: { open: 0, closed: 0, reopen: 0 },
-      byExploitStatus: { available: 0, none: 0, unknown: 0 },
-      topCVEs: [],
-      affectedHosts: 0,
-      withExploits: 0,
-    };
-
     const defaultZTA: ZTASummary = {
       totalAssessed: 0,
       avgScore: 0,
@@ -933,19 +923,17 @@ export class CrowdStrikeClient {
       lowestScores: [],
     };
 
-    // Fetch all data with individual error handling
-    const [alertsResult, hostsResult, incidentsResult, vulnsResult, ztaResult] = await Promise.allSettled([
+    // Fetch all data with individual error handling (Spotlight removed - no license)
+    const [alertsResult, hostsResult, incidentsResult, ztaResult] = await Promise.allSettled([
       this.getAlertSummary(alertDays),
       this.getHostSummary(),
       this.getIncidentSummary(incidentDays),
-      this.getVulnerabilitySummary(),
       this.getZTASummary(),
     ]);
 
     const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value : (errors.push(`Alerts: ${(alertsResult as PromiseRejectedResult).reason}`), defaultAlerts);
     const hosts = hostsResult.status === 'fulfilled' ? hostsResult.value : (errors.push(`Hosts: ${(hostsResult as PromiseRejectedResult).reason}`), defaultHosts);
     const incidents = incidentsResult.status === 'fulfilled' ? incidentsResult.value : (errors.push(`Incidents: ${(incidentsResult as PromiseRejectedResult).reason}`), defaultIncidents);
-    const vulnerabilities = vulnsResult.status === 'fulfilled' ? vulnsResult.value : (errors.push(`Vulnerabilities: ${(vulnsResult as PromiseRejectedResult).reason}`), defaultVulns);
     const zta = ztaResult.status === 'fulfilled' ? ztaResult.value : (errors.push(`ZTA: ${(ztaResult as PromiseRejectedResult).reason}`), defaultZTA);
 
     if (errors.length > 0) {
@@ -956,7 +944,6 @@ export class CrowdStrikeClient {
       alerts,
       hosts,
       incidents,
-      vulnerabilities,
       zta,
       fetchedAt: new Date().toISOString(),
       errors: errors.length > 0 ? errors : undefined,
@@ -988,10 +975,7 @@ export class CrowdStrikeClient {
         modules.push('Incidents');
       } catch { /* Module not available */ }
 
-      try {
-        await this.request('/spotlight/queries/vulnerabilities/v1?limit=1');
-        modules.push('Spotlight');
-      } catch { /* Module not available */ }
+      // Spotlight removed - license not available
 
       try {
         await this.request('/zero-trust-assessment/entities/assessments/v1?ids=test');

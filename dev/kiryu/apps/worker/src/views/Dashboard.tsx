@@ -4,7 +4,7 @@ import { SecurityScore } from './components/SecurityScore';
 import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
-import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, ZTASummary } from '../integrations/crowdstrike/client';
+import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
 
 interface DashboardData {
@@ -12,7 +12,6 @@ interface DashboardData {
     alerts: AlertSummary;
     hosts: HostSummary;
     incidents: IncidentSummary;
-    vulnerabilities: VulnerabilitySummary;
     zta: ZTASummary;
     fetchedAt: string;
     errors?: string[];
@@ -326,47 +325,6 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 </div>
 
                 <div class="card col-4">
-                  <div class="card-title">Vulnerabilities (Spotlight) - {crowdstrike.vulnerabilities.total}</div>
-                  {crowdstrike.vulnerabilities.total > 0 ? (
-                    <>
-                      <div class="stat-row">
-                        <span class="stat-label">Critical</span>
-                        <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.bySeverity.critical}</span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">High</span>
-                        <span class="stat-value severity-high">{crowdstrike.vulnerabilities.bySeverity.high}</span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">Medium</span>
-                        <span class="stat-value severity-medium">{crowdstrike.vulnerabilities.bySeverity.medium}</span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">Low</span>
-                        <span class="stat-value">{crowdstrike.vulnerabilities.bySeverity.low}</span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">With Exploits</span>
-                        <span class="stat-value severity-critical">{crowdstrike.vulnerabilities.withExploits}</span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">Affected Hosts</span>
-                        <span class="stat-value">{crowdstrike.vulnerabilities.affectedHosts}</span>
-                      </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
-                        <div class="stat-label" style="margin-bottom: 0.5rem;">Status:</div>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                          <span class="badge badge-high">Open: {crowdstrike.vulnerabilities.byStatus.open}</span>
-                          <span class="badge">Closed: {crowdstrike.vulnerabilities.byStatus.closed}</span>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <p class="no-data">No vulnerability data (Spotlight not licensed or no vulns)</p>
-                  )}
-                </div>
-
-                <div class="card col-4">
                   <div class="card-title">Zero Trust Assessment</div>
                   {crowdstrike.zta.totalAssessed > 0 ? (
                     <>
@@ -618,41 +576,6 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         <td>{alert.tactic || 'N/A'}</td>
                         <td style="text-transform: capitalize;">{alert.status || 'N/A'}</td>
                         <td>{new Date(alert.created_timestamp).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Row 9: Top CVEs (CrowdStrike Spotlight) */}
-            {crowdstrike && crowdstrike.vulnerabilities.topCVEs && crowdstrike.vulnerabilities.topCVEs.length > 0 && (
-              <div class="card col-12">
-                <div class="card-title">Top CVEs by Affected Hosts</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>CVE ID</th>
-                      <th>Severity</th>
-                      <th>Affected Hosts</th>
-                      <th>ExPRT Rating</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {crowdstrike.vulnerabilities.topCVEs.slice(0, 10).map((cve) => (
-                      <tr key={cve.cve_id}>
-                        <td>
-                          <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`} target="_blank" rel="noopener noreferrer">
-                            {cve.cve_id}
-                          </a>
-                        </td>
-                        <td>
-                          <span class={`badge badge-${cve.severity?.toLowerCase() === 'critical' ? 'critical' : cve.severity?.toLowerCase() === 'high' ? 'high' : cve.severity?.toLowerCase() === 'medium' ? 'medium' : 'low'}`}>
-                            {cve.severity || 'Unknown'}
-                          </span>
-                        </td>
-                        <td>{cve.affected_hosts}</td>
-                        <td>{cve.exprt_rating || 'N/A'}</td>
                       </tr>
                     ))}
                   </tbody>
