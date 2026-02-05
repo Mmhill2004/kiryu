@@ -34,6 +34,20 @@ export class SyncService {
     const syncResults = await Promise.all(syncPromises);
     results.push(...syncResults);
 
+    // Invalidate dashboard cache after sync so next page load gets fresh data
+    try {
+      const cacheKeys = ['cs:summary:24h', 'cs:summary:7d', 'cs:summary:30d', 'cs:summary:90d',
+                         'sf:metrics:24h', 'sf:metrics:7d', 'sf:metrics:30d', 'sf:metrics:90d'];
+      await Promise.all(cacheKeys.map(k => this.env.CACHE.delete(k)));
+    } catch { /* ignore cache errors */ }
+
+    // Run data retention cleanup
+    try {
+      await this.cleanupOldData();
+    } catch (error) {
+      console.error('Data retention cleanup failed:', error);
+    }
+
     return results;
   }
 
@@ -88,14 +102,11 @@ export class SyncService {
       return { platform: 'crowdstrike', status: 'skipped', error: 'Not configured' };
     }
 
-    const client = new CrowdStrikeClient(this.env);
+    const client = new CrowdStrikeClient(this.env, this.env.CACHE);
 
-    // Fetch data from CrowdStrike
-    const [alerts, hosts, incidents] = await Promise.all([
-      client.getAlertSummary(7, 100),
-      client.getHostSummary(),
-      client.getIncidentSummary(30),
-    ]);
+    // Fetch full summary (all 6 modules in parallel)
+    const fullSummary = await client.getFullSummary(7, 30);
+    const { alerts, hosts, incidents, zta, ngsiem, overwatch } = fullSummary;
 
     let recordsSynced = 0;
 
@@ -158,6 +169,66 @@ export class SyncService {
       }),
       new Date().toISOString()
     ).run();
+
+    // Store daily CrowdStrike metrics snapshot
+    const securityScore = Math.max(0, Math.min(100,
+      100 - (alerts.bySeverity.critical * 10 + alerts.bySeverity.high * 5
+        + alerts.bySeverity.medium * 2 + alerts.bySeverity.low * 1)
+    ));
+
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO crowdstrike_metrics_daily (
+          date, alerts_total, alerts_critical, alerts_high, alerts_medium, alerts_low, alerts_informational,
+          alerts_new, alerts_in_progress, alerts_resolved,
+          hosts_total, hosts_online, hosts_offline, hosts_contained, hosts_stale, hosts_reduced_functionality,
+          hosts_windows, hosts_mac, hosts_linux,
+          incidents_total, incidents_open, incidents_closed,
+          incidents_critical, incidents_high, incidents_medium, incidents_low,
+          incidents_with_lateral_movement, incidents_avg_fine_score, incidents_mttr_hours,
+          zta_total_assessed, zta_avg_score, zta_excellent, zta_good, zta_fair, zta_poor,
+          ngsiem_repositories, ngsiem_total_ingest_gb, ngsiem_events_total,
+          ngsiem_auth_events, ngsiem_network_events, ngsiem_process_events, ngsiem_dns_events,
+          overwatch_total_detections, overwatch_active_escalations, overwatch_resolved_30d,
+          overwatch_critical, overwatch_high, overwatch_medium, overwatch_low,
+          security_score, metadata, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+        )
+      `).bind(
+        today,
+        alerts.total, alerts.bySeverity.critical, alerts.bySeverity.high,
+        alerts.bySeverity.medium, alerts.bySeverity.low, alerts.bySeverity.informational,
+        alerts.byStatus.new, alerts.byStatus.in_progress, alerts.byStatus.resolved,
+        hosts.total, hosts.online, hosts.offline, hosts.contained,
+        hosts.staleEndpoints, hosts.reducedFunctionality,
+        hosts.byPlatform.windows, hosts.byPlatform.mac, hosts.byPlatform.linux,
+        incidents.total, incidents.open, incidents.closed,
+        incidents.bySeverity.critical, incidents.bySeverity.high,
+        incidents.bySeverity.medium, incidents.bySeverity.low,
+        incidents.withLateralMovement, incidents.avgFineScore, incidents.mttr || null,
+        zta.totalAssessed, zta.avgScore, zta.scoreDistribution.excellent,
+        zta.scoreDistribution.good, zta.scoreDistribution.fair, zta.scoreDistribution.poor,
+        ngsiem.repositories, ngsiem.totalIngestGB, ngsiem.eventCounts.total,
+        ngsiem.recentActivity.authEvents, ngsiem.recentActivity.networkEvents,
+        ngsiem.recentActivity.processEvents, ngsiem.recentActivity.dnsEvents,
+        overwatch.totalDetections, overwatch.activeEscalations, overwatch.resolvedLast30Days,
+        overwatch.detectionsBySeverity.critical, overwatch.detectionsBySeverity.high,
+        overwatch.detectionsBySeverity.medium, overwatch.detectionsBySeverity.low,
+        securityScore,
+        JSON.stringify({
+          byTactic: alerts.byTactic,
+          byTechnique: alerts.byTechnique,
+          overwatchByTactic: overwatch.detectionsByTactic,
+          ngsiemTopEventTypes: ngsiem.topEventTypes,
+          errors: fullSummary.errors,
+        })
+      ).run();
+    } catch (error) {
+      console.error('Error storing crowdstrike_metrics_daily:', error);
+    }
 
     // Update platform status
     await this.updatePlatformStatus('crowdstrike', 'healthy', {
@@ -280,7 +351,7 @@ export class SyncService {
       return { platform: 'salesforce', status: 'skipped', error: 'Not configured' };
     }
 
-    const client = new SalesforceClient(this.env);
+    const client = new SalesforceClient(this.env, this.env.CACHE);
 
     if (!client.isConfigured()) {
       return { platform: 'salesforce', status: 'skipped', error: 'Not configured' };
@@ -360,7 +431,59 @@ export class SyncService {
       escalation_rate: metrics.escalationRate,
     });
 
+    // Store daily ticket metrics
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO ticket_metrics_daily (
+          date, total_created, total_closed, total_open,
+          avg_resolution_minutes, sla_compliance_rate, escalation_rate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        new Date().toISOString().split('T')[0],
+        metrics.weekOverWeek.thisWeek,
+        0,
+        metrics.openTickets,
+        metrics.mttr.overall,
+        metrics.slaComplianceRate,
+        metrics.escalationRate
+      ).run();
+    } catch (error) {
+      console.error('Error storing ticket_metrics_daily:', error);
+    }
+
     return { platform: 'salesforce', status: 'success', recordsSynced };
+  }
+
+  private async cleanupOldData(): Promise<void> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 90);
+    const cutoff = cutoffDate.toISOString().split('T')[0];
+
+    const tables = [
+      { name: 'crowdstrike_metrics_daily', dateCol: 'date' },
+      { name: 'ticket_metrics_daily', dateCol: 'date' },
+      { name: 'daily_summaries', dateCol: 'date' },
+      { name: 'security_events', dateCol: 'created_at' },
+      { name: 'sync_logs', dateCol: 'started_at' },
+    ];
+
+    for (const table of tables) {
+      try {
+        const result = await this.env.DB.prepare(
+          `DELETE FROM ${table.name} WHERE ${table.dateCol} < ?`
+        ).bind(cutoff).run();
+
+        if (result.meta.changes && result.meta.changes > 0) {
+          await this.env.DB.prepare(`
+            INSERT INTO data_retention_log (run_at, table_name, records_deleted, oldest_date_removed)
+            VALUES (?, ?, ?, ?)
+          `).bind(new Date().toISOString(), table.name, result.meta.changes, cutoff).run();
+          console.log(`Retention: deleted ${result.meta.changes} rows from ${table.name}`);
+        }
+      } catch (error) {
+        console.error(`Retention cleanup failed for ${table.name}:`, error);
+      }
+    }
   }
 
   private handleSyncError(platform: string, error: unknown): SyncResult {

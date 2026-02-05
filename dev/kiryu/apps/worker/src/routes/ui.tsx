@@ -3,6 +3,8 @@ import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
+import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
+import { TrendService, type CrowdStrikeTrends, type SalesforceTrends } from '../services/trends';
 
 export const uiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -11,11 +13,18 @@ export const uiRoutes = new Hono<{ Bindings: Env }>();
  */
 uiRoutes.get('/', async (c) => {
   const period = (c.req.query('period') || '7d') as '24h' | '7d' | '30d' | '90d';
+  const forceRefresh = c.req.query('refresh') === 'true';
   const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
+
+  const cache = new CacheService(c.env.CACHE);
 
   // Initialize with defaults
   let crowdstrike = null;
   let salesforce: TicketMetrics | null = null;
+  let dataSource: 'cache' | 'live' = 'live';
+  let cachedAt: string | null = null;
+  let csTrends: CrowdStrikeTrends | null = null;
+  let sfTrends: SalesforceTrends | null = null;
   let platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -23,73 +32,85 @@ uiRoutes.get('/', async (c) => {
     error_message?: string;
   }> = [];
 
-  // Fetch data from both platforms in parallel
-  const csClient = new CrowdStrikeClient(c.env);
-  const sfClient = new SalesforceClient(c.env);
+  const csClient = new CrowdStrikeClient(c.env, c.env.CACHE);
+  const sfClient = new SalesforceClient(c.env, c.env.CACHE);
+  const trendService = new TrendService(c.env);
 
   const fetchPromises: Promise<void>[] = [];
 
-  // CrowdStrike fetch
+  // CrowdStrike: try cache first, then live API
   if (csClient.isConfigured()) {
-    fetchPromises.push(
-      csClient.getFullSummary(daysBack, 30)
-        .then((data) => {
-          crowdstrike = data;
-          platforms.push({
-            platform: 'crowdstrike',
-            status: 'healthy',
-            last_sync: new Date().toISOString(),
-          });
-        })
-        .catch((error) => {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error('CrowdStrike fetch error:', errorMsg);
-          platforms.push({
-            platform: 'crowdstrike',
-            status: 'error',
-            last_sync: null,
-            error_message: errorMsg,
-          });
-        })
-    );
+    const csCacheKey = `${CACHE_KEYS.CROWDSTRIKE_SUMMARY}:${period}`;
+
+    fetchPromises.push((async () => {
+      // Try cache first
+      if (!forceRefresh) {
+        const cached = await cache.get<typeof crowdstrike>(csCacheKey);
+        if (cached) {
+          crowdstrike = cached.data;
+          dataSource = 'cache';
+          cachedAt = cached.cachedAt;
+          platforms.push({ platform: 'crowdstrike', status: 'healthy', last_sync: cached.cachedAt });
+          return;
+        }
+      }
+
+      // Fall back to live API
+      try {
+        crowdstrike = await csClient.getFullSummary(daysBack, 30);
+        platforms.push({ platform: 'crowdstrike', status: 'healthy', last_sync: new Date().toISOString() });
+        await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
+        dataSource = 'live';
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('CrowdStrike fetch error:', errorMsg);
+        platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: errorMsg });
+      }
+    })());
   } else {
-    platforms.push({
-      platform: 'crowdstrike',
-      status: 'not_configured',
-      last_sync: null,
-    });
+    platforms.push({ platform: 'crowdstrike', status: 'not_configured', last_sync: null });
   }
 
-  // Salesforce fetch
+  // Salesforce: try cache first, then live API
   if (sfClient.isConfigured()) {
-    fetchPromises.push(
-      sfClient.getDashboardMetrics()
-        .then((data) => {
-          salesforce = data;
-          platforms.push({
-            platform: 'salesforce',
-            status: 'healthy',
-            last_sync: new Date().toISOString(),
-          });
-        })
-        .catch((error) => {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error('Salesforce fetch error:', errorMsg);
-          platforms.push({
-            platform: 'salesforce',
-            status: 'error',
-            last_sync: null,
-            error_message: errorMsg,
-          });
-        })
-    );
+    const sfCacheKey = `${CACHE_KEYS.SALESFORCE_METRICS}:${period}`;
+
+    fetchPromises.push((async () => {
+      if (!forceRefresh) {
+        const cached = await cache.get<TicketMetrics>(sfCacheKey);
+        if (cached) {
+          salesforce = cached.data;
+          if (!cachedAt) cachedAt = cached.cachedAt;
+          platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: cached.cachedAt });
+          return;
+        }
+      }
+
+      try {
+        salesforce = await sfClient.getDashboardMetrics();
+        platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
+        await cache.set(sfCacheKey, salesforce, CACHE_TTL.DASHBOARD_DATA);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('Salesforce fetch error:', errorMsg);
+        platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: errorMsg });
+      }
+    })());
   } else {
-    platforms.push({
-      platform: 'salesforce',
-      status: 'not_configured',
-      last_sync: null,
-    });
+    platforms.push({ platform: 'salesforce', status: 'not_configured', last_sync: null });
   }
+
+  // Fetch trend data from D1 (fast, no external API calls)
+  fetchPromises.push(
+    trendService.getCrowdStrikeTrends(daysBack)
+      .then(data => { csTrends = data; })
+      .catch(err => console.error('CS trend fetch error:', err))
+  );
+  fetchPromises.push(
+    trendService.getSalesforceTrends(daysBack)
+      .then(data => { sfTrends = data; })
+      .catch(err => console.error('SF trend fetch error:', err))
+  );
 
   // Wait for all fetches to complete
   await Promise.all(fetchPromises);
@@ -109,6 +130,10 @@ uiRoutes.get('/', async (c) => {
         platforms,
         period,
         lastUpdated: new Date().toISOString(),
+        dataSource,
+        cachedAt,
+        csTrends,
+        sfTrends,
       }}
     />
   );

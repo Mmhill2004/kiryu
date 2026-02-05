@@ -2,6 +2,9 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types/env';
+import { TrendService } from '../services/trends';
+import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
+import { SalesforceClient } from '../integrations/salesforce/client';
 
 export const dashboardRoutes = new Hono<{ Bindings: Env }>();
 
@@ -281,6 +284,34 @@ dashboardRoutes.get('/incidents/recent', async (c) => {
 });
 
 /**
+ * Get historical trends from D1
+ */
+dashboardRoutes.get('/trends', zValidator('query', z.object({
+  metric: z.enum(['crowdstrike', 'salesforce', 'all']).default('all'),
+  period: z.enum(['24h', '7d', '30d', '90d']).default('7d'),
+})), async (c) => {
+  const { metric, period } = c.req.valid('query');
+  const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
+
+  const trendService = new TrendService(c.env);
+
+  try {
+    const result: Record<string, unknown> = { period };
+
+    if (metric === 'crowdstrike' || metric === 'all') {
+      result.crowdstrike = await trendService.getCrowdStrikeTrends(daysBack);
+    }
+    if (metric === 'salesforce' || metric === 'all') {
+      result.salesforce = await trendService.getSalesforceTrends(daysBack);
+    }
+
+    return c.json(result);
+  } catch (error) {
+    return c.json({ period, error: 'Failed to fetch trends', crowdstrike: null, salesforce: null });
+  }
+});
+
+/**
  * Get service desk metrics from Salesforce
  */
 dashboardRoutes.get('/tickets/metrics', zValidator('query', dateRangeSchema), async (c) => {
@@ -320,5 +351,86 @@ dashboardRoutes.get('/tickets/metrics', zValidator('query', dateRangeSchema), as
       },
       _note: 'No ticket data available yet.',
     });
+  }
+});
+
+/**
+ * Get AI-friendly executive summary with plain-language narrative
+ */
+dashboardRoutes.get('/executive-summary', zValidator('query', z.object({
+  period: z.enum(['24h', '7d', '30d', '90d']).default('7d'),
+})), async (c) => {
+  const { period } = c.req.valid('query');
+  const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
+
+  try {
+    const csClient = new CrowdStrikeClient(c.env, c.env.CACHE);
+    const sfClient = new SalesforceClient(c.env, c.env.CACHE);
+    const trendService = new TrendService(c.env);
+
+    const [csSummary, sfMetrics, csTrends, sfTrends] = await Promise.allSettled([
+      csClient.isConfigured() ? csClient.getFullSummary(daysBack, 30) : null,
+      sfClient.isConfigured() ? sfClient.getDashboardMetrics() : null,
+      trendService.getCrowdStrikeTrends(daysBack),
+      trendService.getSalesforceTrends(daysBack),
+    ]);
+
+    const cs = csSummary.status === 'fulfilled' ? csSummary.value : null;
+    const sf = sfMetrics.status === 'fulfilled' ? sfMetrics.value : null;
+    const csT = csTrends.status === 'fulfilled' ? csTrends.value : null;
+    const sfT = sfTrends.status === 'fulfilled' ? sfTrends.value : null;
+
+    // Build plain-language narrative
+    const riskAreas: string[] = [];
+    const keyMetrics: Record<string, unknown> = {};
+
+    if (cs) {
+      keyMetrics.securityScore = Math.max(0, Math.min(100,
+        100 - (cs.alerts.bySeverity.critical * 10 + cs.alerts.bySeverity.high * 5
+          + cs.alerts.bySeverity.medium * 2 + cs.alerts.bySeverity.low * 1)));
+      keyMetrics.totalAlerts = cs.alerts.total;
+      keyMetrics.criticalAlerts = cs.alerts.bySeverity.critical;
+      keyMetrics.totalEndpoints = cs.hosts.total;
+      keyMetrics.containedEndpoints = cs.hosts.contained;
+      keyMetrics.openIncidents = cs.incidents.open;
+
+      if (cs.alerts.bySeverity.critical > 0) riskAreas.push(`${cs.alerts.bySeverity.critical} critical alert(s) require immediate attention`);
+      if (cs.hosts.contained > 0) riskAreas.push(`${cs.hosts.contained} endpoint(s) are currently contained`);
+      if (cs.incidents.withLateralMovement > 0) riskAreas.push(`Lateral movement detected in ${cs.incidents.withLateralMovement} incident(s)`);
+    }
+
+    if (sf) {
+      keyMetrics.openTickets = sf.openTickets;
+      keyMetrics.mttrMinutes = sf.mttr.overall;
+      keyMetrics.slaCompliance = sf.slaComplianceRate;
+
+      if (sf.slaComplianceRate < 95) riskAreas.push(`SLA compliance at ${sf.slaComplianceRate.toFixed(0)}% (below 95% target)`);
+      if (sf.escalationRate > 15) riskAreas.push(`Escalation rate at ${sf.escalationRate.toFixed(1)}% (above 15% threshold)`);
+    }
+
+    const recommendations: string[] = [];
+    if (cs?.alerts.bySeverity.critical) recommendations.push('Prioritize triage of critical security alerts');
+    if (cs?.hosts.contained) recommendations.push('Complete forensic analysis on contained endpoints');
+    if (sf && sf.slaComplianceRate < 95) recommendations.push('Review ticket triage process to improve SLA compliance');
+    if (csT?.alertsTotal && csT.alertsTotal.direction === 'up') recommendations.push('Investigate increasing alert volume trend');
+
+    return c.json({
+      period,
+      narrative: `Security posture for the ${period} period. ${cs ? `Monitoring ${cs.hosts.total} endpoints with ${cs.alerts.total} active alerts (${cs.alerts.bySeverity.critical} critical).` : 'CrowdStrike data unavailable.'} ${sf ? `Service desk has ${sf.openTickets} open tickets with ${sf.slaComplianceRate.toFixed(0)}% SLA compliance.` : ''}`,
+      keyMetrics,
+      riskAreas,
+      recommendations,
+      trends: { crowdstrike: csT, salesforce: sfT },
+    });
+  } catch (error) {
+    return c.json({
+      period,
+      narrative: 'Unable to generate executive summary due to data fetch errors.',
+      keyMetrics: {},
+      riskAreas: [],
+      recommendations: [],
+      trends: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
   }
 });

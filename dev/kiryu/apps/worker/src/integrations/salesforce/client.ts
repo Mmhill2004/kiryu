@@ -79,8 +79,11 @@ export class SalesforceClient {
   private tokenExpiry: number = 0;
   private instanceUrl: string | null = null;
   private readonly apiVersion = 'v59.0';
+  private cache: KVNamespace | null;
 
-  constructor(private env: Env) {}
+  constructor(private env: Env, cache?: KVNamespace) {
+    this.cache = cache || null;
+  }
 
   /**
    * Check if Salesforce is configured
@@ -100,6 +103,22 @@ export class SalesforceClient {
     // Return cached token if valid
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken;
+    }
+
+    // Check KV cache
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get('auth:sf:token', 'text');
+        if (cached) {
+          const parsed = JSON.parse(cached) as { access_token: string; instance_url: string; expiry: number };
+          if (parsed.expiry > Date.now()) {
+            this.accessToken = parsed.access_token;
+            this.instanceUrl = parsed.instance_url;
+            this.tokenExpiry = parsed.expiry;
+            return this.accessToken;
+          }
+        }
+      } catch { /* ignore cache errors */ }
     }
 
     // Use instance URL directly for My Domain orgs (most common now)
@@ -134,6 +153,19 @@ export class SalesforceClient {
     this.instanceUrl = data.instance_url || this.env.SALESFORCE_INSTANCE_URL;
     // Refresh 60 seconds before expiry (default 2 hours)
     this.tokenExpiry = Date.now() + ((data.expires_in || 7200) - 60) * 1000;
+
+    // Store in KV
+    if (this.cache) {
+      try {
+        await this.cache.put('auth:sf:token', JSON.stringify({
+          access_token: this.accessToken,
+          instance_url: this.instanceUrl,
+          expiry: this.tokenExpiry,
+        }), {
+          expirationTtl: Math.max(60, Math.floor((this.tokenExpiry - Date.now()) / 1000)),
+        });
+      } catch { /* ignore cache errors */ }
+    }
 
     return this.accessToken;
   }

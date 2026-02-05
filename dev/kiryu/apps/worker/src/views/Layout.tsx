@@ -939,6 +939,64 @@ const styles = `
     to { transform: rotate(360deg); }
   }
 
+  /* Trend indicators */
+  .metric-trend {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-top: var(--space-xs);
+    letter-spacing: 0.02em;
+  }
+
+  .trend-good {
+    color: var(--healthy);
+  }
+
+  .trend-bad {
+    color: var(--critical);
+  }
+
+  /* Cache indicator */
+  .cache-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+  }
+
+  .cache-indicator a {
+    font-family: var(--font-display);
+  }
+
+  /* Report link button */
+  .report-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s ease;
+  }
+
+  .report-link:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+    text-decoration: none;
+  }
+
+  .report-link svg {
+    width: 16px;
+    height: 16px;
+  }
+
   /* Links */
   a {
     color: var(--accent-primary);

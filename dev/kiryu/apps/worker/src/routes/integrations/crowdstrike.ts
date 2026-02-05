@@ -198,13 +198,13 @@ crowdstrikeRoutes.get('/incidents/list', async (c) => {
 });
 
 // ============================================
-// VULNERABILITIES ENDPOINTS (Spotlight)
+// NGSIEM / LOGSCALE ENDPOINTS
 // ============================================
 
 /**
- * Get vulnerability summary
+ * Get NGSIEM summary
  */
-crowdstrikeRoutes.get('/vulnerabilities', async (c) => {
+crowdstrikeRoutes.get('/ngsiem', async (c) => {
   const client = new CrowdStrikeClient(c.env);
 
   if (!client.isConfigured()) {
@@ -212,33 +212,66 @@ crowdstrikeRoutes.get('/vulnerabilities', async (c) => {
   }
 
   try {
-    const summary = await client.getVulnerabilitySummary();
+    const summary = await client.getNGSIEMSummary();
     return c.json(summary);
   } catch (error) {
     return c.json({
-      error: 'Failed to fetch vulnerabilities',
+      error: 'Failed to fetch NGSIEM data',
       message: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
 });
 
+// ============================================
+// OVERWATCH ENDPOINTS
+// ============================================
+
 /**
- * Get raw vulnerabilities list
+ * Get OverWatch threat hunting summary
  */
-crowdstrikeRoutes.get('/vulnerabilities/list', async (c) => {
+crowdstrikeRoutes.get('/overwatch', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const limit = parseInt(c.req.query('limit') || '100');
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
   }
 
   try {
-    const vulnerabilities = await client.getVulnerabilities(limit);
-    return c.json({ vulnerabilities, count: vulnerabilities.length });
+    const summary = await client.getOverWatchSummary();
+    return c.json(summary);
   } catch (error) {
     return c.json({
-      error: 'Failed to fetch vulnerabilities',
+      error: 'Failed to fetch OverWatch data',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// ============================================
+// ALERT DETAIL ENDPOINT
+// ============================================
+
+/**
+ * Get a specific alert by composite ID
+ */
+crowdstrikeRoutes.get('/alerts/:id', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+  const alertId = c.req.param('id');
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const alerts = await client.getAlerts(30, 500);
+    const alert = alerts.find(a => a.composite_id === alertId);
+    if (!alert) {
+      return c.json({ error: 'Alert not found' }, 404);
+    }
+    return c.json(alert);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch alert',
       message: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }

@@ -340,9 +340,11 @@ export interface ZTASummary {
 export class CrowdStrikeClient {
   private baseUrl: string;
   private token: CrowdStrikeToken | null = null;
+  private cache: KVNamespace | null;
 
-  constructor(private env: Env) {
+  constructor(private env: Env, cache?: KVNamespace) {
     this.baseUrl = env.CROWDSTRIKE_BASE_URL || 'https://api.crowdstrike.com';
+    this.cache = cache || null;
   }
 
   /**
@@ -358,6 +360,20 @@ export class CrowdStrikeClient {
   private async authenticate(): Promise<string> {
     if (this.token && this.token.expires_at > Date.now()) {
       return this.token.access_token;
+    }
+
+    // Check KV cache
+    if (this.cache) {
+      try {
+        const cached = await this.cache.get('auth:cs:token', 'text');
+        if (cached) {
+          const parsed = JSON.parse(cached) as CrowdStrikeToken;
+          if (parsed.expires_at > Date.now()) {
+            this.token = parsed;
+            return parsed.access_token;
+          }
+        }
+      } catch { /* ignore cache errors */ }
     }
 
     const response = await fetch(`${this.baseUrl}/oauth2/token`, {
@@ -383,6 +399,15 @@ export class CrowdStrikeClient {
       expires_in: data.expires_in,
       expires_at: Date.now() + (data.expires_in * 1000) - 60000, // Refresh 1 min early
     };
+
+    // Store in KV
+    if (this.cache) {
+      try {
+        await this.cache.put('auth:cs:token', JSON.stringify(this.token), {
+          expirationTtl: Math.max(60, data.expires_in - 120),
+        });
+      } catch { /* ignore cache errors */ }
+    }
 
     return this.token.access_token;
   }

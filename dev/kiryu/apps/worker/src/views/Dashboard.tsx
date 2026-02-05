@@ -6,6 +6,7 @@ import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
 import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary, NGSIEMSummary, OverWatchSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
+import type { CrowdStrikeTrends, SalesforceTrends } from '../services/trends';
 
 interface DashboardData {
   crowdstrike: {
@@ -27,6 +28,10 @@ interface DashboardData {
   }>;
   period: string;
   lastUpdated: string;
+  dataSource: 'cache' | 'live';
+  cachedAt: string | null;
+  csTrends: CrowdStrikeTrends | null;
+  sfTrends: SalesforceTrends | null;
 }
 
 interface Props {
@@ -48,7 +53,7 @@ const formatDuration = (minutes: number): string => {
 };
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, platforms, period, lastUpdated } = data;
+  const { crowdstrike, salesforce, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
 
   // Calculate security score from CrowdStrike data
   let securityScore = 100;
@@ -94,8 +99,18 @@ export const Dashboard: FC<Props> = ({ data }) => {
             </select>
           </form>
 
+          <a href="/api/reports/latest" class="report-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            Report
+          </a>
+
           <button
-            hx-get={`/?period=${period}`}
+            hx-get={`/?period=${period}&refresh=true`}
             hx-target="body"
             hx-swap="outerHTML"
             class="refresh-btn"
@@ -168,11 +183,13 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <MetricCard
                       label="Total Endpoints"
                       value={crowdstrike.hosts.total}
+                      trend={csTrends?.hostsTotal ? { ...csTrends.hostsTotal, invertColor: true } : undefined}
                     />
                     <MetricCard
                       label="Online"
                       value={crowdstrike.hosts.online}
                       severity={crowdstrike.hosts.online > 0 ? undefined : 'medium'}
+                      trend={csTrends?.hostsOnline ? { ...csTrends.hostsOnline, invertColor: true } : undefined}
                     />
                     <MetricCard
                       label="Contained"
@@ -198,6 +215,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     label="Critical"
                     value={crowdstrike.alerts.bySeverity.critical}
                     severity="critical"
+                    trend={csTrends?.alertsCritical}
                   />
                   <MetricCard
                     label="High"
@@ -230,6 +248,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <MetricCard
                     label="Total Alerts"
                     value={crowdstrike.alerts.total}
+                    trend={csTrends?.alertsTotal}
                   />
                   <MetricCard
                     label="New"
@@ -258,21 +277,25 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     label="Open Tickets"
                     value={salesforce.openTickets}
                     severity={salesforce.openTickets > 10 ? 'high' : salesforce.openTickets > 5 ? 'medium' : undefined}
+                    trend={sfTrends?.openTickets}
                   />
                   <MetricCard
                     label="MTTR"
                     value={formatDuration(salesforce.mttr.overall)}
                     severity={salesforce.mttr.overall > 240 ? 'high' : salesforce.mttr.overall > 120 ? 'medium' : undefined}
+                    trend={sfTrends?.mttrOverall}
                   />
                   <MetricCard
                     label="SLA Compliance"
                     value={`${salesforce.slaComplianceRate.toFixed(0)}%`}
                     severity={salesforce.slaComplianceRate < 90 ? 'critical' : salesforce.slaComplianceRate < 95 ? 'medium' : undefined}
+                    trend={sfTrends?.slaCompliance ? { ...sfTrends.slaCompliance, invertColor: true } : undefined}
                   />
                   <MetricCard
                     label="Escalation Rate"
                     value={`${salesforce.escalationRate.toFixed(1)}%`}
                     severity={salesforce.escalationRate > 15 ? 'high' : salesforce.escalationRate > 10 ? 'medium' : undefined}
+                    trend={sfTrends?.escalationRate}
                   />
                   <MetricCard
                     label="Backlog Age"
@@ -706,8 +729,15 @@ export const Dashboard: FC<Props> = ({ data }) => {
       {/* Footer */}
       <footer>
         <p>Last updated: {new Date(lastUpdated).toLocaleString()}</p>
-        {crowdstrike && <p>CrowdStrike data fetched at {new Date(crowdstrike.fetchedAt).toLocaleString()}</p>}
-        {salesforce && <p>Salesforce data fetched at {new Date(salesforce.fetchedAt).toLocaleString()}</p>}
+        {dataSource === 'cache' && cachedAt && (
+          <p class="cache-indicator">
+            Cached data from {new Date(cachedAt).toLocaleString()} &mdash;{' '}
+            <a href={`/?period=${period}&refresh=true`}>Force refresh</a>
+          </p>
+        )}
+        {dataSource === 'live' && (
+          <p class="cache-indicator">Live data</p>
+        )}
       </footer>
     </Layout>
   );

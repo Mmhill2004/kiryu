@@ -178,6 +178,104 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "get_ngsiem_summary",
+    description:
+      "Get CrowdStrike NGSIEM/LogScale metrics including repository counts, data ingest volumes, saved searches, and recent event activity. Use this to understand log management and SIEM capabilities.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_overwatch_summary",
+    description:
+      "Get CrowdStrike OverWatch threat hunting summary including proactive detections, active escalations, hunting coverage, and detections by severity and tactic. OverWatch provides 24/7 expert threat hunting.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_historical_trends",
+    description:
+      "Get historical trend data from the D1 database showing how security metrics have changed over time. Returns period-over-period comparisons with sparkline data for visualization.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        metric: {
+          type: "string",
+          enum: ["crowdstrike", "salesforce", "all"],
+          description: "Which platform's trends to fetch",
+          default: "all",
+        },
+        period: {
+          type: "string",
+          enum: ["24h", "7d", "30d", "90d"],
+          description: "Time period for trend analysis",
+          default: "7d",
+        },
+      },
+    },
+  },
+  {
+    name: "generate_security_report",
+    description:
+      "Generate an executive-friendly monthly security report stored in R2. The report includes security score, threat landscape, incident response metrics, OverWatch hunting activity, NGSIEM data, service desk performance, and actionable recommendations in plain language.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        year: {
+          type: "number",
+          description: "Year for the report (e.g. 2026). Defaults to current/previous month.",
+        },
+        month: {
+          type: "number",
+          description: "Month for the report (1-12). Defaults to previous month.",
+        },
+      },
+    },
+  },
+  {
+    name: "list_reports",
+    description:
+      "List all available monthly security reports stored in R2. Returns report keys, upload dates, and sizes.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_executive_summary",
+    description:
+      "Get a plain-language executive summary of the current security posture. Returns a narrative description, key metrics, risk areas, and recommendations suitable for non-technical stakeholders.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        period: {
+          type: "string",
+          enum: ["24h", "7d", "30d", "90d"],
+          description: "Time period for the summary",
+          default: "7d",
+        },
+      },
+    },
+  },
+  {
+    name: "investigate_alert",
+    description:
+      "Deep dive into a specific CrowdStrike alert by its composite ID. Returns full alert details including severity, MITRE ATT&CK tactic/technique, affected hostname, timestamps, and raw detection data.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        alert_id: {
+          type: "string",
+          description: "The composite ID of the CrowdStrike alert to investigate",
+        },
+      },
+      required: ["alert_id"],
+    },
+  },
 ];
 
 // Tool handlers
@@ -229,6 +327,45 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_microsoft_secure_score": {
       return apiRequest("/api/integrations/microsoft/secure-score");
+    }
+
+    case "get_ngsiem_summary": {
+      return apiRequest("/api/integrations/crowdstrike/ngsiem");
+    }
+
+    case "get_overwatch_summary": {
+      return apiRequest("/api/integrations/crowdstrike/overwatch");
+    }
+
+    case "get_historical_trends": {
+      const metric = (args.metric as string) || "all";
+      const period = (args.period as string) || "7d";
+      return apiRequest(`/api/dashboard/trends?metric=${metric}&period=${period}`);
+    }
+
+    case "generate_security_report": {
+      const body: Record<string, number> = {};
+      if (args.year) body.year = args.year as number;
+      if (args.month) body.month = args.month as number;
+      return apiRequest("/api/reports/generate", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    }
+
+    case "list_reports": {
+      return apiRequest("/api/reports");
+    }
+
+    case "get_executive_summary": {
+      const period = (args.period as string) || "7d";
+      return apiRequest(`/api/dashboard/executive-summary?period=${period}`);
+    }
+
+    case "investigate_alert": {
+      const alertId = args.alert_id as string;
+      if (!alertId) throw new Error("alert_id is required");
+      return apiRequest(`/api/integrations/crowdstrike/alerts/${encodeURIComponent(alertId)}`);
     }
 
     default:
