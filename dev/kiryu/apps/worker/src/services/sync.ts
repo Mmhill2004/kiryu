@@ -459,6 +459,15 @@ export class SyncService {
     cutoffDate.setDate(cutoffDate.getDate() - 90);
     const cutoff = cutoffDate.toISOString().split('T')[0];
 
+    // Whitelist of allowed table/column pairs for retention cleanup
+    const ALLOWED_CLEANUP = new Map([
+      ['crowdstrike_metrics_daily', 'date'],
+      ['ticket_metrics_daily', 'date'],
+      ['daily_summaries', 'date'],
+      ['security_events', 'created_at'],
+      ['sync_logs', 'started_at'],
+    ]);
+
     const tables = [
       { name: 'crowdstrike_metrics_daily', dateCol: 'date' },
       { name: 'ticket_metrics_daily', dateCol: 'date' },
@@ -468,6 +477,10 @@ export class SyncService {
     ];
 
     for (const table of tables) {
+      if (ALLOWED_CLEANUP.get(table.name) !== table.dateCol) {
+        console.error(`Retention: skipping unrecognized table ${table.name}`);
+        continue;
+      }
       try {
         const result = await this.env.DB.prepare(
           `DELETE FROM ${table.name} WHERE ${table.dateCol} < ?`

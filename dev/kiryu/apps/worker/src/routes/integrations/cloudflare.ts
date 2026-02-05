@@ -20,7 +20,7 @@ cloudflareRoutes.get('/access/logs', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch Access logs',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -41,7 +41,7 @@ cloudflareRoutes.get('/gateway/logs', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch Gateway logs',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -62,7 +62,7 @@ cloudflareRoutes.get('/security/events', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch security events',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -79,7 +79,7 @@ cloudflareRoutes.get('/stats', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch stats',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -96,7 +96,7 @@ cloudflareRoutes.get('/access/apps', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch Access apps',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });

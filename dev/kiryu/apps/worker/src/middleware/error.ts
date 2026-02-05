@@ -32,7 +32,7 @@ export function errorHandler(err: Error, c: Context<{ Bindings: Env }>) {
   // Handle Hono HTTP exceptions
   if (err instanceof HTTPException) {
     return c.json({
-      error: err.message,
+      error: c.env.ENVIRONMENT === 'development' ? err.message : 'Request error',
       statusCode: err.status,
       requestId,
     }, err.status);
@@ -54,7 +54,7 @@ export function errorHandler(err: Error, c: Context<{ Bindings: Env }>) {
     return c.json({
       error: 'Validation Error',
       message: 'Invalid request data',
-      details: (err as any).errors,
+      details: c.env.ENVIRONMENT === 'development' ? (err as any).errors : undefined,
       requestId,
     }, 400);
   }

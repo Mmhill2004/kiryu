@@ -17,7 +17,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
 
   // Validate API key
   const validApiKey = c.env.DASHBOARD_API_KEY;
-  
+
   if (!validApiKey) {
     console.error('DASHBOARD_API_KEY not configured');
     return c.json({
@@ -27,7 +27,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
   }
 
   // Constant-time comparison to prevent timing attacks
-  if (!secureCompare(apiKey, validApiKey)) {
+  if (!(await secureCompare(apiKey, validApiKey))) {
     return c.json({
       error: 'Unauthorized',
       message: 'Invalid API key',
@@ -57,17 +57,37 @@ function extractBearerToken(authHeader: string | undefined): string | null {
 }
 
 /**
- * Constant-time string comparison to prevent timing attacks
+ * Constant-time string comparison using HMAC-SHA256.
+ * Hashing both inputs normalizes length and prevents timing side-channels.
  */
-function secureCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-
+async function secureCompare(a: string, b: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode('kiryu-compare'),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const [sigA, sigB] = await Promise.all([
+    crypto.subtle.sign('HMAC', key, encoder.encode(a)),
+    crypto.subtle.sign('HMAC', key, encoder.encode(b)),
+  ]);
+  const viewA = new Uint8Array(sigA);
+  const viewB = new Uint8Array(sigB);
   let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < viewA.length; i++) {
+    result |= viewA[i] ^ viewB[i];
   }
-  
   return result === 0;
+}
+
+/**
+ * Safely parse an integer from a query parameter with bounds enforcement.
+ * Returns the default if the value is missing, NaN, or out of bounds.
+ */
+export function safeInt(value: string | undefined, defaultVal: number, max: number): number {
+  const n = parseInt(value || String(defaultVal), 10);
+  if (isNaN(n) || n < 1) return defaultVal;
+  return Math.min(n, max);
 }

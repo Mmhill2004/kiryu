@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { SyncService } from '../services/sync';
+import { safeInt } from '../middleware/auth';
 
 export const syncRoutes = new Hono<{ Bindings: Env }>();
 
@@ -21,7 +22,7 @@ syncRoutes.post('/all', async (c) => {
     console.error('Sync failed:', error);
     return c.json({
       error: 'Sync failed',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -53,7 +54,7 @@ syncRoutes.post('/:platform', async (c) => {
     console.error(`${platform} sync failed:`, error);
     return c.json({
       error: `${platform} sync failed`,
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -99,7 +100,7 @@ syncRoutes.get('/status', async (c) => {
  * Get sync history/logs
  */
 syncRoutes.get('/history', async (c) => {
-  const limit = parseInt(c.req.query('limit') || '50');
+  const limit = safeInt(c.req.query('limit'), 50, 100);
   const platform = c.req.query('platform');
 
   try {

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../types/env';
 import { SalesforceClient } from '../../integrations/salesforce/client';
+import { safeInt } from '../../middleware/auth';
 
 export const salesforceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -36,8 +37,8 @@ salesforceRoutes.get('/tickets', async (c) => {
     }, 400);
   }
 
-  const days = parseInt(c.req.query('days') || '30');
-  const limit = parseInt(c.req.query('limit') || '100');
+  const days = safeInt(c.req.query('days'), 30, 90);
+  const limit = safeInt(c.req.query('limit'), 100, 500);
 
   try {
     const tickets = await client.getSecurityTickets(days, limit);
@@ -49,7 +50,7 @@ salesforceRoutes.get('/tickets', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch tickets',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -77,7 +78,7 @@ salesforceRoutes.get('/metrics', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch metrics',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -109,7 +110,7 @@ salesforceRoutes.get('/open', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch open tickets',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -128,7 +129,7 @@ salesforceRoutes.get('/mttr', async (c) => {
     }, 400);
   }
 
-  const days = parseInt(c.req.query('days') || '30');
+  const days = safeInt(c.req.query('days'), 30, 90);
 
   try {
     const closedTickets = await client.getClosedTickets(days);
@@ -143,7 +144,7 @@ salesforceRoutes.get('/mttr', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch MTTR',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -175,7 +176,7 @@ salesforceRoutes.get('/workload', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch agent workload',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });

@@ -16,7 +16,7 @@ microsoftRoutes.get('/alerts', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch alerts',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -33,7 +33,7 @@ microsoftRoutes.get('/secure-score', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch secure score',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -50,7 +50,7 @@ microsoftRoutes.get('/defender/alerts', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch Defender alerts',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -67,7 +67,7 @@ microsoftRoutes.get('/recommendations', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch recommendations',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -84,7 +84,7 @@ microsoftRoutes.get('/compliance', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch compliance',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });

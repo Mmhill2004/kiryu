@@ -40,8 +40,12 @@ reportRoutes.get('/latest', async (c) => {
  */
 reportRoutes.get('/:yearMonth', async (c) => {
   const yearMonth = c.req.param('yearMonth');
-  const reportService = new ReportService(c.env);
 
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    return c.json({ error: 'Invalid format. Use YYYY-MM' }, 400);
+  }
+
+  const reportService = new ReportService(c.env);
   const key = `reports/${yearMonth}-security-report.html`;
   const html = await reportService.getReport(key);
 
@@ -60,8 +64,10 @@ reportRoutes.post('/generate', async (c) => {
 
   // Default to previous month
   const now = new Date();
-  const year = body.year || (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
-  const month = body.month || (now.getMonth() === 0 ? 12 : now.getMonth());
+  const defaultYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const defaultMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+  const year = typeof body.year === 'number' && body.year >= 2020 && body.year <= 2099 ? body.year : defaultYear;
+  const month = typeof body.month === 'number' && body.month >= 1 && body.month <= 12 ? body.month : defaultMonth;
 
   const reportService = new ReportService(c.env);
 
@@ -74,8 +80,7 @@ reportRoutes.post('/generate', async (c) => {
       message: `Report generated for ${year}-${String(month).padStart(2, '0')}`,
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Report generation failed:', msg);
-    return c.json({ success: false, error: msg }, 500);
+    console.error('Report generation failed:', error instanceof Error ? error.message : error);
+    return c.json({ success: false, error: 'Report generation failed' }, 500);
   }
 });

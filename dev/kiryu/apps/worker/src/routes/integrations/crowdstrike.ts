@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../types/env';
 import { CrowdStrikeClient } from '../../integrations/crowdstrike/client';
+import { safeInt } from '../../middleware/auth';
 
 export const crowdstrikeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -33,8 +34,8 @@ crowdstrikeRoutes.get('/test', async (c) => {
  */
 crowdstrikeRoutes.get('/summary', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const alertDays = parseInt(c.req.query('alert_days') || '7');
-  const incidentDays = parseInt(c.req.query('incident_days') || '30');
+  const alertDays = safeInt(c.req.query('alert_days'), 7, 90);
+  const incidentDays = safeInt(c.req.query('incident_days'), 30, 90);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -46,7 +47,7 @@ crowdstrikeRoutes.get('/summary', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch CrowdStrike data',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -60,8 +61,8 @@ crowdstrikeRoutes.get('/summary', async (c) => {
  */
 crowdstrikeRoutes.get('/alerts', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const daysBack = parseInt(c.req.query('days') || '7');
-  const limit = parseInt(c.req.query('limit') || '500');
+  const daysBack = safeInt(c.req.query('days'), 7, 90);
+  const limit = safeInt(c.req.query('limit'), 500, 500);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -73,7 +74,7 @@ crowdstrikeRoutes.get('/alerts', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch alerts',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -83,8 +84,8 @@ crowdstrikeRoutes.get('/alerts', async (c) => {
  */
 crowdstrikeRoutes.get('/alerts/list', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const daysBack = parseInt(c.req.query('days') || '7');
-  const limit = parseInt(c.req.query('limit') || '100');
+  const daysBack = safeInt(c.req.query('days'), 7, 90);
+  const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -96,7 +97,7 @@ crowdstrikeRoutes.get('/alerts/list', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch alerts',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -121,7 +122,7 @@ crowdstrikeRoutes.get('/hosts', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch hosts',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -131,7 +132,7 @@ crowdstrikeRoutes.get('/hosts', async (c) => {
  */
 crowdstrikeRoutes.get('/hosts/list', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const limit = parseInt(c.req.query('limit') || '100');
+  const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -143,7 +144,7 @@ crowdstrikeRoutes.get('/hosts/list', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch hosts',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -157,7 +158,7 @@ crowdstrikeRoutes.get('/hosts/list', async (c) => {
  */
 crowdstrikeRoutes.get('/incidents', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const daysBack = parseInt(c.req.query('days') || '30');
+  const daysBack = safeInt(c.req.query('days'), 30, 90);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -169,7 +170,7 @@ crowdstrikeRoutes.get('/incidents', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch incidents',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -179,8 +180,8 @@ crowdstrikeRoutes.get('/incidents', async (c) => {
  */
 crowdstrikeRoutes.get('/incidents/list', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const daysBack = parseInt(c.req.query('days') || '30');
-  const limit = parseInt(c.req.query('limit') || '100');
+  const daysBack = safeInt(c.req.query('days'), 30, 90);
+  const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -192,7 +193,7 @@ crowdstrikeRoutes.get('/incidents/list', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch incidents',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -217,7 +218,7 @@ crowdstrikeRoutes.get('/ngsiem', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch NGSIEM data',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -242,7 +243,7 @@ crowdstrikeRoutes.get('/overwatch', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch OverWatch data',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -272,7 +273,7 @@ crowdstrikeRoutes.get('/alerts/:id', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch alert',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -297,7 +298,7 @@ crowdstrikeRoutes.get('/zta', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch ZTA scores',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });
@@ -307,7 +308,7 @@ crowdstrikeRoutes.get('/zta', async (c) => {
  */
 crowdstrikeRoutes.get('/zta/list', async (c) => {
   const client = new CrowdStrikeClient(c.env);
-  const limit = parseInt(c.req.query('limit') || '100');
+  const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -319,7 +320,7 @@ crowdstrikeRoutes.get('/zta/list', async (c) => {
   } catch (error) {
     return c.json({
       error: 'Failed to fetch ZTA scores',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });

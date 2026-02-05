@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
-import { timing } from 'hono/timing';
 
 // Route imports
 import { healthRoutes } from './routes/health';
@@ -27,9 +26,17 @@ import type { Env } from './types/env';
 const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware
-app.use('*', timing());
 app.use('*', logger());
-app.use('*', secureHeaders());
+app.use('*', secureHeaders({
+  contentSecurityPolicy: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", 'https://unpkg.com'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+    fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+    imgSrc: ["'self'", 'data:'],
+    connectSrc: ["'self'"],
+  },
+}));
 
 // Error handling
 app.onError(errorHandler);
@@ -58,10 +65,7 @@ app.route('/api/v1/sync', syncRoutes);
 
 // 404 handler
 app.notFound((c) => {
-  return c.json({
-    error: 'Not Found',
-    message: `Route ${c.req.method} ${c.req.path} not found`,
-  }, 404);
+  return c.json({ error: 'Not Found' }, 404);
 });
 
 // Export for Cloudflare Workers

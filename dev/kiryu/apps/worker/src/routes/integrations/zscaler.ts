@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../types/env';
 import { ZscalerClient } from '../../integrations/zscaler/client';
+import { safeInt } from '../../middleware/auth';
 
 export const zscalerRoutes = new Hono<{ Bindings: Env }>();
 
@@ -9,7 +10,7 @@ export const zscalerRoutes = new Hono<{ Bindings: Env }>();
  */
 zscalerRoutes.get('/events', async (c) => {
   const client = new ZscalerClient(c.env);
-  const hours = parseInt(c.req.query('hours') || '24');
+  const hours = safeInt(c.req.query('hours'), 24, 720);
   
   try {
     const events = await client.getSecurityEvents(hours);
@@ -17,7 +18,7 @@ zscalerRoutes.get('/events', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch events',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -34,7 +35,7 @@ zscalerRoutes.get('/activity', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch activity',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -51,7 +52,7 @@ zscalerRoutes.get('/blocked-categories', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch blocked categories',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });

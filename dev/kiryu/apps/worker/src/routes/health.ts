@@ -10,7 +10,6 @@ healthRoutes.get('/', async (c) => {
   return c.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    environment: c.env.ENVIRONMENT,
   });
 });
 
@@ -29,7 +28,7 @@ healthRoutes.get('/detailed', async (c) => {
     checks['database'] = { 
       status: 'unhealthy', 
       latency: Date.now() - dbStart,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Connection failed'
     };
   }
 
@@ -42,7 +41,7 @@ healthRoutes.get('/detailed', async (c) => {
     checks['cache'] = { 
       status: 'unhealthy', 
       latency: Date.now() - kvStart,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Connection failed'
     };
   }
 
@@ -64,25 +63,14 @@ healthRoutes.get('/detailed', async (c) => {
     }
   }
 
-  // Check integration credentials are configured
-  const integrations = {
-    crowdstrike: !!(c.env.CROWDSTRIKE_CLIENT_ID && c.env.CROWDSTRIKE_CLIENT_SECRET),
-    abnormal: !!c.env.ABNORMAL_API_TOKEN,
-    zscaler: !!(c.env.ZSCALER_API_KEY && c.env.ZSCALER_API_SECRET),
-    microsoft: !!(c.env.AZURE_TENANT_ID && c.env.AZURE_CLIENT_ID && c.env.AZURE_CLIENT_SECRET),
-    salesforce: !!(c.env.SALESFORCE_CLIENT_ID && c.env.SALESFORCE_CLIENT_SECRET),
-  };
-
   const allHealthy = Object.values(checks).every(c => c.status === 'healthy');
   const overallStatus = allHealthy ? 'healthy' : 'degraded';
 
   return c.json({
     status: overallStatus,
     timestamp: new Date().toISOString(),
-    environment: c.env.ENVIRONMENT,
     version: '0.1.0',
     checks,
-    integrations,
   }, allHealthy ? 200 : 503);
 });
 

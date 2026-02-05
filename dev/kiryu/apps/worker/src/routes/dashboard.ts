@@ -5,6 +5,7 @@ import type { Env } from '../types/env';
 import { TrendService } from '../services/trends';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient } from '../integrations/salesforce/client';
+import { safeInt } from '../middleware/auth';
 
 export const dashboardRoutes = new Hono<{ Bindings: Env }>();
 
@@ -253,7 +254,7 @@ dashboardRoutes.get('/platforms/status', async (c) => {
  * Get recent incidents across all platforms
  */
 dashboardRoutes.get('/incidents/recent', async (c) => {
-  const limit = parseInt(c.req.query('limit') || '20');
+  const limit = safeInt(c.req.query('limit'), 20, 100);
 
   try {
     const incidents = await c.env.DB.prepare(`
@@ -430,7 +431,7 @@ dashboardRoutes.get('/executive-summary', zValidator('query', z.object({
       riskAreas: [],
       recommendations: [],
       trends: null,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An internal error occurred',
     }, 500);
   }
 });

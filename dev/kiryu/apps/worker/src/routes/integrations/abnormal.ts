@@ -16,7 +16,7 @@ abnormalRoutes.get('/threats', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch threats',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -33,7 +33,7 @@ abnormalRoutes.get('/stats', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch stats',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });
@@ -50,7 +50,7 @@ abnormalRoutes.get('/cases', async (c) => {
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch cases',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'An internal error occurred'
     }, 500);
   }
 });

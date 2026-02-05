@@ -12,7 +12,11 @@ export const uiRoutes = new Hono<{ Bindings: Env }>();
  * Main dashboard page
  */
 uiRoutes.get('/', async (c) => {
-  const period = (c.req.query('period') || '7d') as '24h' | '7d' | '30d' | '90d';
+  const validPeriods = ['24h', '7d', '30d', '90d'] as const;
+  const rawPeriod = c.req.query('period') || '7d';
+  const period = (validPeriods as readonly string[]).includes(rawPeriod)
+    ? (rawPeriod as typeof validPeriods[number])
+    : '7d';
   const forceRefresh = c.req.query('refresh') === 'true';
   const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
 
@@ -62,9 +66,8 @@ uiRoutes.get('/', async (c) => {
         await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
         dataSource = 'live';
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error('CrowdStrike fetch error:', errorMsg);
-        platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: errorMsg });
+        console.error('CrowdStrike fetch error:', error instanceof Error ? error.message : error);
+        platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: 'Failed to connect' });
       }
     })());
   } else {
@@ -91,9 +94,8 @@ uiRoutes.get('/', async (c) => {
         platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
         await cache.set(sfCacheKey, salesforce, CACHE_TTL.DASHBOARD_DATA);
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error('Salesforce fetch error:', errorMsg);
-        platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: errorMsg });
+        console.error('Salesforce fetch error:', error instanceof Error ? error.message : error);
+        platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: 'Failed to connect' });
       }
     })());
   } else {
