@@ -53,8 +53,8 @@ microsoftRoutes.get('/alerts', async (c) => {
   const client = new MicrosoftClient(c.env);
 
   try {
-    const alerts = await client.getSecurityAlerts();
-    return c.json({ alerts, count: alerts.length });
+    const analytics = await client.getAlertAnalytics();
+    return c.json(analytics);
   } catch (error) {
     return c.json({
       error: 'Failed to fetch alerts',
@@ -87,8 +87,8 @@ microsoftRoutes.get('/defender/alerts', async (c) => {
   const client = new MicrosoftClient(c.env);
   
   try {
-    const alerts = await client.getDefenderAlerts();
-    return c.json({ alerts, count: alerts.length });
+    const analytics = await client.getDefenderAnalytics();
+    return c.json(analytics);
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch Defender alerts',
@@ -104,8 +104,8 @@ microsoftRoutes.get('/recommendations', async (c) => {
   const client = new MicrosoftClient(c.env);
   
   try {
-    const recommendations = await client.getSecurityRecommendations();
-    return c.json({ recommendations, count: recommendations.length });
+    const assessments = await client.getAssessmentAnalytics();
+    return c.json(assessments);
   } catch (error) {
     return c.json({ 
       error: 'Failed to fetch recommendations',

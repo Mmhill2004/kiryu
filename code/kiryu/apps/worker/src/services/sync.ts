@@ -314,7 +314,7 @@ export class SyncService {
     let recordsSynced = 0;
 
     // Store Graph security alerts
-    for (const alert of summary.alerts) {
+    for (const alert of summary.alertAnalytics.recentAlerts) {
       await this.env.DB.prepare(`
         INSERT OR REPLACE INTO security_events
         (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
@@ -331,7 +331,7 @@ export class SyncService {
     }
 
     // Store Defender for Endpoint alerts
-    for (const alert of summary.defenderAlerts) {
+    for (const alert of summary.defenderAnalytics.recentAlerts) {
       await this.env.DB.prepare(`
         INSERT OR REPLACE INTO security_events
         (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
@@ -375,12 +375,15 @@ export class SyncService {
     }
 
     await this.updatePlatformStatus('microsoft', 'healthy', {
-      security_alerts: summary.alerts.length,
-      defender_alerts: summary.defenderAlerts.length,
+      security_alerts: summary.alertAnalytics.total,
+      defender_alerts: summary.defenderAnalytics.total,
       secure_score: summary.secureScore?.currentScore || null,
       compliant_devices: summary.compliance.compliant,
       non_compliant_devices: summary.compliance.nonCompliant,
-      recommendations: summary.recommendations.length,
+      assessments: summary.assessments.total,
+      risky_users: summary.identity.riskyUsers.unresolvedCount,
+      incidents: summary.incidents.open,
+      machines: summary.machines.total,
       errors: summary.errors,
     });
 

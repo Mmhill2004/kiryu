@@ -73,19 +73,12 @@ export const Dashboard: FC<Props> = ({ data }) => {
     securityScore = Math.max(0, Math.min(100, 100 - totalWeight));
   }
   if (microsoft) {
-    let msWeight = 0;
-    for (const alert of microsoft.alerts) {
-      const sev = alert.severity?.toLowerCase();
-      if (sev === 'high') msWeight += 5;
-      else if (sev === 'medium') msWeight += 2;
-      else if (sev === 'low') msWeight += 1;
-    }
-    for (const alert of microsoft.defenderAlerts) {
-      const sev = alert.severity?.toLowerCase();
-      if (sev === 'high') msWeight += 5;
-      else if (sev === 'medium') msWeight += 2;
-      else if (sev === 'low') msWeight += 1;
-    }
+    const aa = microsoft.alertAnalytics;
+    const da = microsoft.defenderAnalytics;
+    const msWeight =
+      (aa.bySeverity.high + da.bySeverity.high) * 5 +
+      (aa.bySeverity.medium + da.bySeverity.medium) * 2 +
+      (aa.bySeverity.low + da.bySeverity.low) * 1;
     securityScore = Math.max(0, Math.min(100, securityScore - msWeight));
   }
 
@@ -364,166 +357,387 @@ export const Dashboard: FC<Props> = ({ data }) => {
               </div>
             )}
 
-            {/* Row 3b: Microsoft Security Overview */}
-            {microsoft && (
-              <div class="col-12">
-                <div class="card-title" style="margin-bottom: 1rem;">Microsoft Security</div>
-                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
-                  <MetricCard
-                    label="Secure Score"
-                    value={microsoft.secureScore
-                      ? `${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%`
-                      : 'N/A'}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Entra Alerts"
-                    value={microsoft.alerts.length}
-                    severity={microsoft.alerts.some(a => a.severity?.toLowerCase() === 'high') ? 'high' : undefined}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Defender Alerts"
-                    value={microsoft.defenderAlerts.length}
-                    severity={microsoft.defenderAlerts.some(a => a.severity?.toLowerCase() === 'high') ? 'high' : undefined}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Compliant Devices"
-                    value={microsoft.compliance.compliant}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Non-Compliant"
-                    value={microsoft.compliance.nonCompliant}
-                    severity={microsoft.compliance.nonCompliant > 0 ? 'high' : undefined}
-                    source="MS"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Row 3c: Microsoft Details */}
+            {/* ═══ Microsoft Security ═══ */}
             {microsoft && (
               <>
-                {microsoft.secureScore && (
-                  <div class="card col-4">
-                    <div class="card-title">Microsoft Secure Score</div>
-                    <div class="stat-row">
-                      <span class="stat-label">Current Score</span>
-                      <span class="stat-value">{microsoft.secureScore.currentScore.toFixed(1)}</span>
+                {/* MS Row 1: Top-Level KPIs */}
+                <div class="col-12">
+                  <div class="card-title" style="margin-bottom: 1rem;">Microsoft Security</div>
+                  <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                    <MetricCard
+                      label="Secure Score"
+                      value={microsoft.secureScore
+                        ? `${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%`
+                        : 'N/A'}
+                      source="MS"
+                    />
+                    <MetricCard
+                      label="Active Alerts"
+                      value={microsoft.alertAnalytics.active}
+                      severity={microsoft.alertAnalytics.bySeverity.high > 0 ? 'high' : undefined}
+                      source="MS"
+                    />
+                    <MetricCard
+                      label="Risky Users"
+                      value={microsoft.identity.riskyUsers.unresolvedCount}
+                      severity={microsoft.identity.riskyUsers.byRiskLevel.high > 0 ? 'critical' : microsoft.identity.riskyUsers.unresolvedCount > 0 ? 'high' : undefined}
+                      source="MS"
+                    />
+                    <MetricCard
+                      label="Open Incidents"
+                      value={microsoft.incidents.open}
+                      severity={microsoft.incidents.bySeverity.high > 0 ? 'high' : undefined}
+                      source="MS"
+                    />
+                    <MetricCard
+                      label="Managed Endpoints"
+                      value={microsoft.machines.total}
+                      source="MS"
+                    />
+                    <MetricCard
+                      label="Cloud Pass Rate"
+                      value={`${microsoft.assessments.passRate}%`}
+                      severity={microsoft.assessments.passRate < 70 ? 'critical' : microsoft.assessments.passRate < 85 ? 'medium' : undefined}
+                      source="MS"
+                    />
+                  </div>
+                </div>
+
+                {/* MS Row 2: Entra Alert Breakdown + Defender Breakdown + Identity Risk */}
+                <div class="card col-4">
+                  <div class="card-title">Entra Security Alerts ({microsoft.alertAnalytics.total})</div>
+                  <div class="stat-row">
+                    <span class="stat-label">Active</span>
+                    <span class="stat-value severity-high">{microsoft.alertAnalytics.active}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">New Today</span>
+                    <span class="stat-value">{microsoft.alertAnalytics.newToday}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Unassigned</span>
+                    <span class="stat-value severity-medium">{microsoft.alertAnalytics.unassigned}</span>
+                  </div>
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                      <span class="badge badge-critical">High: {microsoft.alertAnalytics.bySeverity.high}</span>
+                      <span class="badge badge-medium">Medium: {microsoft.alertAnalytics.bySeverity.medium}</span>
+                      <span class="badge badge-low">Low: {microsoft.alertAnalytics.bySeverity.low}</span>
+                      <span class="badge badge-info">Info: {microsoft.alertAnalytics.bySeverity.informational}</span>
                     </div>
-                    <div class="stat-row">
-                      <span class="stat-label">Max Score</span>
-                      <span class="stat-value">{microsoft.secureScore.maxScore.toFixed(1)}</span>
-                    </div>
-                    <div class="stat-row">
-                      <span class="stat-label">Percentage</span>
-                      <span class="stat-value">
-                        {((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    {microsoft.secureScore.averageComparativeScores.length > 0 && (
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
-                        <div class="stat-label" style="margin-bottom: 0.5rem;">Industry Comparison:</div>
-                        {microsoft.secureScore.averageComparativeScores.map((comp) => (
-                          <div class="stat-row" key={comp.basis}>
-                            <span class="stat-label">{comp.basis}</span>
-                            <span class="stat-value">{comp.averageScore.toFixed(1)}</span>
+                  </div>
+                  {Object.keys(microsoft.alertAnalytics.byCategory).length > 0 && (
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div class="stat-label" style="margin-bottom: 0.5rem;">Top Categories:</div>
+                      {Object.entries(microsoft.alertAnalytics.byCategory)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 4)
+                        .map(([cat, count]) => (
+                          <div class="stat-row" key={cat}>
+                            <span class="stat-label">{cat}</span>
+                            <span class="stat-value">{count}</span>
                           </div>
                         ))}
+                    </div>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Defender for Endpoint ({microsoft.defenderAnalytics.total})</div>
+                  <div class="stat-row">
+                    <span class="stat-label">Active</span>
+                    <span class="stat-value severity-high">{microsoft.defenderAnalytics.active}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Linked to Incidents</span>
+                    <span class="stat-value">{microsoft.defenderAnalytics.linkedToIncidents}</span>
+                  </div>
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                      <span class="badge badge-critical">High: {microsoft.defenderAnalytics.bySeverity.high}</span>
+                      <span class="badge badge-medium">Medium: {microsoft.defenderAnalytics.bySeverity.medium}</span>
+                      <span class="badge badge-low">Low: {microsoft.defenderAnalytics.bySeverity.low}</span>
+                      <span class="badge badge-info">Info: {microsoft.defenderAnalytics.bySeverity.informational}</span>
+                    </div>
+                  </div>
+                  {Object.keys(microsoft.defenderAnalytics.byDetectionSource).length > 0 && (
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div class="stat-label" style="margin-bottom: 0.5rem;">Detection Sources:</div>
+                      {Object.entries(microsoft.defenderAnalytics.byDetectionSource)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 4)
+                        .map(([src, count]) => (
+                          <div class="stat-row" key={src}>
+                            <span class="stat-label">{src}</span>
+                            <span class="stat-value">{count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Identity Risk</div>
+                  {microsoft.identity.riskyUsers.total > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Total Risky Users</span>
+                        <span class="stat-value">{microsoft.identity.riskyUsers.total}</span>
                       </div>
-                    )}
+                      <div class="stat-row">
+                        <span class="stat-label">Unresolved</span>
+                        <span class="stat-value severity-critical">{microsoft.identity.riskyUsers.unresolvedCount}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Confirmed Compromised</span>
+                        <span class="stat-value severity-critical">{microsoft.identity.riskyUsers.byRiskState.confirmedCompromised}</span>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">By Risk Level:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-critical">High: {microsoft.identity.riskyUsers.byRiskLevel.high}</span>
+                          <span class="badge badge-medium">Medium: {microsoft.identity.riskyUsers.byRiskLevel.medium}</span>
+                          <span class="badge badge-low">Low: {microsoft.identity.riskyUsers.byRiskLevel.low}</span>
+                        </div>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">By State:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-critical">At Risk: {microsoft.identity.riskyUsers.byRiskState.atRisk}</span>
+                          <span class="badge badge-low">Remediated: {microsoft.identity.riskyUsers.byRiskState.remediated}</span>
+                          <span class="badge badge-info">Dismissed: {microsoft.identity.riskyUsers.byRiskState.dismissed}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p class="no-data">No risky users detected</p>
+                  )}
+                </div>
+
+                {/* MS Row 3: Incidents + Machines + Assessments/Compliance */}
+                <div class="card col-4">
+                  <div class="card-title">Security Incidents ({microsoft.incidents.total})</div>
+                  {microsoft.incidents.total > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Open</span>
+                        <span class="stat-value severity-high">{microsoft.incidents.open}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Unassigned</span>
+                        <span class="stat-value severity-medium">{microsoft.incidents.unassigned}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Redirected</span>
+                        <span class="stat-value">{microsoft.incidents.redirected}</span>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-critical">High: {microsoft.incidents.bySeverity.high}</span>
+                          <span class="badge badge-medium">Medium: {microsoft.incidents.bySeverity.medium}</span>
+                          <span class="badge badge-low">Low: {microsoft.incidents.bySeverity.low}</span>
+                        </div>
+                      </div>
+                      {Object.keys(microsoft.incidents.byDetermination).length > 0 && (
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                          <div class="stat-label" style="margin-bottom: 0.5rem;">By Determination:</div>
+                          {Object.entries(microsoft.incidents.byDetermination)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 4)
+                            .map(([det, count]) => (
+                              <div class="stat-row" key={det}>
+                                <span class="stat-label">{det}</span>
+                                <span class="stat-value">{count}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p class="no-data">No incidents</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Defender Machines ({microsoft.machines.total})</div>
+                  {microsoft.machines.total > 0 ? (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Onboarded</span>
+                        <span class="stat-value">{microsoft.machines.onboarded}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Stale (7+ days)</span>
+                        <span class="stat-value severity-medium">{microsoft.machines.stale}</span>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">By Risk Score:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-critical">High: {microsoft.machines.byRiskScore.high}</span>
+                          <span class="badge badge-medium">Medium: {microsoft.machines.byRiskScore.medium}</span>
+                          <span class="badge badge-low">Low: {microsoft.machines.byRiskScore.low}</span>
+                          <span class="badge badge-info">None: {microsoft.machines.byRiskScore.none}</span>
+                        </div>
+                      </div>
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">By Exposure:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          <span class="badge badge-critical">High: {microsoft.machines.byExposureLevel.high}</span>
+                          <span class="badge badge-medium">Medium: {microsoft.machines.byExposureLevel.medium}</span>
+                          <span class="badge badge-low">Low: {microsoft.machines.byExposureLevel.low}</span>
+                        </div>
+                      </div>
+                      {Object.keys(microsoft.machines.byOsPlatform).length > 0 && (
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                          <div class="stat-label" style="margin-bottom: 0.5rem;">By OS:</div>
+                          {Object.entries(microsoft.machines.byOsPlatform)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([os, count]) => (
+                              <div class="stat-row" key={os}>
+                                <span class="stat-label">{os}</span>
+                                <span class="stat-value">{count}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p class="no-data">No machines data</p>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Cloud Security &amp; Compliance</div>
+                  {/* Secure Score */}
+                  {microsoft.secureScore && (
+                    <>
+                      <div class="stat-row">
+                        <span class="stat-label">Secure Score</span>
+                        <span class="stat-value">{microsoft.secureScore.currentScore.toFixed(1)} / {microsoft.secureScore.maxScore.toFixed(1)}</span>
+                      </div>
+                      {microsoft.secureScore.averageComparativeScores.length > 0 &&
+                        microsoft.secureScore.averageComparativeScores.map((comp) => (
+                          <div class="stat-row" key={comp.basis}>
+                            <span class="stat-label">vs {comp.basis}</span>
+                            <span class="stat-value">{comp.averageScore.toFixed(1)}</span>
+                          </div>
+                        ))
+                      }
+                    </>
+                  )}
+                  {/* Assessments */}
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div class="stat-label" style="margin-bottom: 0.5rem;">Cloud Assessments ({microsoft.assessments.total}):</div>
+                    <div class="stat-row">
+                      <span class="stat-label">Pass Rate</span>
+                      <span class={`stat-value ${microsoft.assessments.passRate < 70 ? 'severity-critical' : microsoft.assessments.passRate < 85 ? 'severity-medium' : ''}`}>
+                        {microsoft.assessments.passRate}%
+                      </span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Healthy</span>
+                      <span class="stat-value">{microsoft.assessments.healthy}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Unhealthy</span>
+                      <span class="stat-value severity-high">{microsoft.assessments.unhealthy}</span>
+                    </div>
+                  </div>
+                  {/* Device Compliance */}
+                  {(microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown) > 0 && (
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div class="stat-label" style="margin-bottom: 0.5rem;">Device Compliance:</div>
+                      <div class="stat-row">
+                        <span class="stat-label">Compliant</span>
+                        <span class="stat-value">{microsoft.compliance.compliant}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Non-Compliant</span>
+                        <span class="stat-value severity-critical">{microsoft.compliance.nonCompliant}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Compliance Rate</span>
+                        <span class="stat-value">
+                          {((microsoft.compliance.compliant / (microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown)) * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* MS Row 4: Recent Alerts Table */}
+                {microsoft.alertAnalytics.recentAlerts.length > 0 && (
+                  <div class="card col-12">
+                    <div class="card-title">Recent Microsoft Security Alerts</div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Severity</th>
+                          <th>Title</th>
+                          <th>Category</th>
+                          <th>Provider</th>
+                          <th>Status</th>
+                          <th>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {microsoft.alertAnalytics.recentAlerts.slice(0, 10).map((alert) => (
+                          <tr key={alert.id}>
+                            <td>
+                              <span class={`badge badge-${alert.severity?.toLowerCase() || 'medium'}`}>
+                                {alert.severity || 'Unknown'}
+                              </span>
+                            </td>
+                            <td>{alert.title?.slice(0, 60) || 'N/A'}{alert.title && alert.title.length > 60 ? '...' : ''}</td>
+                            <td>{alert.category || 'N/A'}</td>
+                            <td>{alert.vendorInformation?.provider || 'N/A'}</td>
+                            <td style="text-transform: capitalize;">{alert.status || 'N/A'}</td>
+                            <td>{new Date(alert.createdDateTime).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
-                <div class="card col-4">
-                  <div class="card-title">Device Compliance</div>
-                  <div class="stat-row">
-                    <span class="stat-label">Compliant</span>
-                    <span class="stat-value severity-low">{microsoft.compliance.compliant}</span>
+                {/* MS Row 5: Recent Incidents Table */}
+                {microsoft.incidents.recentIncidents.length > 0 && (
+                  <div class="card col-12">
+                    <div class="card-title">Recent Microsoft Incidents</div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Severity</th>
+                          <th>Name</th>
+                          <th>Status</th>
+                          <th>Classification</th>
+                          <th>Assigned To</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {microsoft.incidents.recentIncidents.slice(0, 10).map((inc) => (
+                          <tr key={inc.id}>
+                            <td>
+                              <span class={`badge badge-${inc.severity?.toLowerCase() === 'high' ? 'critical' : inc.severity?.toLowerCase() || 'medium'}`}>
+                                {inc.severity || 'Unknown'}
+                              </span>
+                            </td>
+                            <td>{inc.displayName?.slice(0, 60) || 'N/A'}{inc.displayName && inc.displayName.length > 60 ? '...' : ''}</td>
+                            <td style="text-transform: capitalize;">{inc.status || 'N/A'}</td>
+                            <td>{inc.classification || 'N/A'}</td>
+                            <td>{inc.assignedTo || 'Unassigned'}</td>
+                            <td>{new Date(inc.createdDateTime).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div class="stat-row">
-                    <span class="stat-label">Non-Compliant</span>
-                    <span class="stat-value severity-critical">{microsoft.compliance.nonCompliant}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">Unknown</span>
-                    <span class="stat-value">{microsoft.compliance.unknown}</span>
-                  </div>
-                  {(microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown) > 0 && (
-                    <div class="stat-row">
-                      <span class="stat-label">Compliance Rate</span>
-                      <span class="stat-value">
-                        {((microsoft.compliance.compliant / (microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown)) * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div class="card col-4">
-                  <div class="card-title">Security Recommendations ({microsoft.recommendations.length})</div>
-                  {microsoft.recommendations.length > 0 ? (
-                    <div>
-                      <div class="stat-row">
-                        <span class="stat-label">High</span>
-                        <span class="stat-value severity-high">
-                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'high').length}
-                        </span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">Medium</span>
-                        <span class="stat-value severity-medium">
-                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'medium').length}
-                        </span>
-                      </div>
-                      <div class="stat-row">
-                        <span class="stat-label">Low</span>
-                        <span class="stat-value">
-                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'low').length}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <p class="no-data">No recommendations available</p>
-                  )}
-                </div>
+                )}
               </>
-            )}
-
-            {/* Row 3d: Recent Microsoft Alerts */}
-            {microsoft && microsoft.alerts.length > 0 && (
-              <div class="card col-12">
-                <div class="card-title">Recent Microsoft Security Alerts</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Severity</th>
-                      <th>Title</th>
-                      <th>Category</th>
-                      <th>Provider</th>
-                      <th>Status</th>
-                      <th>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {microsoft.alerts.slice(0, 10).map((alert) => (
-                      <tr key={alert.id}>
-                        <td>
-                          <span class={`badge badge-${alert.severity?.toLowerCase() || 'medium'}`}>
-                            {alert.severity || 'Unknown'}
-                          </span>
-                        </td>
-                        <td>{alert.title?.slice(0, 60) || 'N/A'}{alert.title && alert.title.length > 60 ? '...' : ''}</td>
-                        <td>{alert.category || 'N/A'}</td>
-                        <td>{alert.vendorInformation?.provider || 'N/A'}</td>
-                        <td style="text-transform: capitalize;">{alert.status || 'N/A'}</td>
-                        <td>{new Date(alert.createdDateTime).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             )}
 
             {/* Row 4: CrowdStrike Details */}
