@@ -37,9 +37,9 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 |----------|--------|-------|
 | **CrowdStrike** | ✅ Active | Alerts, Hosts, Incidents, ZTA, NGSIEM/LogScale, OverWatch |
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
+| **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance |
 | **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
 | **Zscaler** | ⚪ Stubbed | Client ready, needs credentials |
-| **Microsoft** | ⚪ Stubbed | Client ready, needs credentials |
 | **Cloudflare** | ⚪ Stubbed | Access/Gateway logs, needs API token |
 
 ## Tech Stack
@@ -48,11 +48,11 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Framework**: Hono (API + JSX views)
 - **Interactivity**: htmx
 - **Database**: Cloudflare D1 (SQLite)
-- **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth)
+- **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth, per-scope MS OAuth)
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 16 tools
+- **AI Integration**: MCP server with 22 tools
 
 ## Common Commands
 
@@ -93,9 +93,9 @@ kiryu/
 │   ├── integrations/         # API clients
 │   │   ├── crowdstrike/client.ts  # Full: Alerts, Hosts, Incidents, ZTA, NGSIEM, OverWatch
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
+│   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations
 │   │   ├── abnormal/client.ts     # Stubbed
 │   │   ├── zscaler/client.ts      # Stubbed
-│   │   ├── microsoft/client.ts    # Stubbed
 │   │   └── cloudflare/client.ts   # Stubbed
 │   ├── services/
 │   │   ├── sync.ts           # Background sync + D1 snapshots + 90-day retention
@@ -121,6 +121,16 @@ Full implementation with 6 modules:
 - `getOverWatchSummary()` - Threat hunting detections, escalations, coverage
 - `getFullSummary()` - All 6 modules in parallel
 
+### Microsoft Client (`integrations/microsoft/client.ts`)
+Full implementation with 5 modules across 3 API surfaces:
+- OAuth2 client credentials flow with per-scope token caching (Graph, Defender, Management)
+- `getSecurityAlerts()` - Entra / Graph Security alerts (alerts_v2 API)
+- `getSecureScore()` - Microsoft Secure Score
+- `getDefenderAlerts()` - Defender for Endpoint alerts (Security Center API)
+- `getSecurityRecommendations()` - Cloud Defender assessments (Azure Management API, subscription-scoped if `AZURE_SUBSCRIPTION_ID` set)
+- `getDeviceCompliance()` - Intune device compliance (compliant/nonCompliant/unknown)
+- `getFullSummary()` - All 5 modules in parallel with error isolation
+
 ### Salesforce Client (`integrations/salesforce/client.ts`)
 Full implementation with:
 - OAuth2 Client Credentials flow (KV-backed, 118 min TTL)
@@ -133,7 +143,7 @@ Full implementation with:
 
 ### Services
 
-- **CacheService** (`services/cache.ts`) - KV wrapper with well-known keys (`cs:summary:{period}`, `sf:metrics:{period}`) and TTL management
+- **CacheService** (`services/cache.ts`) - KV wrapper with well-known keys (`cs:summary:{period}`, `sf:metrics:{period}`, `ms:summary:{period}`) and TTL management
 - **TrendService** (`services/trends.ts`) - Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline)
 - **ReportService** (`services/report.ts`) - Generates HTML executive reports from D1 data, stores in R2, with rules-based recommendation engine
 - **SyncService** (`services/sync.ts`) - Cron-triggered sync storing daily snapshots to D1, invalidating KV cache, enforcing 90-day data retention
@@ -189,6 +199,15 @@ Self-contained HTML report with inline CSS:
 - `GET /api/integrations/crowdstrike/zta` - Zero Trust Assessment summary
 - `GET /api/integrations/crowdstrike/zta/list` - Raw ZTA scores
 
+### Microsoft
+- `GET /api/integrations/microsoft/test` - Test connection
+- `GET /api/integrations/microsoft/summary` - Full summary (all 5 modules)
+- `GET /api/integrations/microsoft/alerts` - Entra security alerts
+- `GET /api/integrations/microsoft/defender/alerts` - Defender for Endpoint alerts
+- `GET /api/integrations/microsoft/secure-score` - Microsoft Secure Score
+- `GET /api/integrations/microsoft/recommendations` - Cloud Defender assessments
+- `GET /api/integrations/microsoft/compliance` - Device compliance
+
 ### Salesforce
 - `GET /api/integrations/salesforce/test` - Test connection
 - `GET /api/integrations/salesforce/metrics` - All KPIs
@@ -211,7 +230,7 @@ Self-contained HTML report with inline CSS:
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 16 tools:
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 22 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -224,6 +243,11 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 | `get_crowdstrike_detections` | Endpoint detection details |
 | `get_email_threats` | Abnormal email threats |
 | `get_microsoft_secure_score` | Microsoft 365/Azure secure score |
+| `get_microsoft_summary` | Full Microsoft security summary (all 5 modules) |
+| `get_microsoft_alerts` | Entra / Graph Security alerts |
+| `get_microsoft_defender_alerts` | Defender for Endpoint alerts |
+| `get_microsoft_compliance` | Intune device compliance status |
+| `get_microsoft_recommendations` | Cloud Defender security assessments |
 | `get_ngsiem_summary` | CrowdStrike LogScale metrics |
 | `get_overwatch_summary` | OverWatch threat hunting data |
 | `get_historical_trends` | D1 trend data with period comparisons |
@@ -261,18 +285,21 @@ SALESFORCE_INSTANCE_URL      # e.g., https://yourorg.my.salesforce.com
 SALESFORCE_CLIENT_ID         # Connected App Consumer Key
 SALESFORCE_CLIENT_SECRET     # Connected App Consumer Secret
 
+# Microsoft / Azure
+AZURE_TENANT_ID              # Entra ID Directory (tenant) ID
+AZURE_CLIENT_ID              # App Registration Application (client) ID
+AZURE_CLIENT_SECRET          # App Registration client secret value
+
 # Dashboard API (for programmatic access)
 DASHBOARD_API_KEY
 ```
 
 ### Optional (for additional integrations)
 ```bash
+AZURE_SUBSCRIPTION_ID        # Scope Cloud Defender recommendations to a subscription
 ABNORMAL_API_TOKEN
 ZSCALER_API_KEY
 ZSCALER_API_SECRET
-AZURE_TENANT_ID
-AZURE_CLIENT_ID
-AZURE_CLIENT_SECRET
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
@@ -317,6 +344,15 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### Salesforce "request not supported on this domain"
 -> Use your My Domain URL (e.g., `https://yourorg.my.salesforce.com`) not `login.salesforce.com`
+
+### Microsoft authentication failed / 401 errors
+-> Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET are set correctly. Ensure admin consent was granted for all API permissions in the Azure portal.
+
+### Microsoft Defender for Endpoint returns empty
+-> Ensure the app registration has `WindowsDefenderATP Alert.Read.All` permission with admin consent granted. The Defender API uses a separate scope (`api.securitycenter.microsoft.com/.default`).
+
+### Microsoft Cloud Defender recommendations return empty
+-> Set `AZURE_SUBSCRIPTION_ID` secret to scope the query to a specific subscription. The provider-level endpoint may return empty without subscription context.
 
 ### CrowdStrike 403 errors
 -> Check API client scopes in Falcon console, ensure read access to alerts/hosts/incidents
