@@ -11,9 +11,10 @@ interface Props {
   value: number | string;
   severity?: 'critical' | 'high' | 'medium' | 'low';
   trend?: TrendInfo;
+  source?: 'CS' | 'SF' | 'MS';
 }
 
-export const MetricCard: FC<Props> = ({ label, value, severity, trend }) => {
+export const MetricCard: FC<Props> = ({ label, value, severity, trend, source }) => {
   const severityClass = severity ? `severity-${severity}` : '';
 
   const trendArrow = trend && trend.direction !== 'flat'
@@ -35,6 +36,7 @@ export const MetricCard: FC<Props> = ({ label, value, severity, trend }) => {
           {trendArrow} {Math.abs(trend.changePercent).toFixed(1)}%
         </div>
       )}
+      {source && <div class="metric-source">{source}</div>}
     </div>
   );
 };

@@ -956,6 +956,20 @@ const styles = `
     color: var(--critical);
   }
 
+  .metric-source {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: var(--space-xs);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    display: inline-block;
+  }
+
   /* Cache indicator */
   .cache-indicator {
     display: inline-flex;

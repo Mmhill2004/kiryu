@@ -6,6 +6,7 @@ import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
 import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary, NGSIEMSummary, OverWatchSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
+import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
 import type { CrowdStrikeTrends, SalesforceTrends } from '../services/trends';
 
 interface DashboardData {
@@ -20,6 +21,7 @@ interface DashboardData {
     errors?: string[];
   } | null;
   salesforce: TicketMetrics | null;
+  microsoft: MicrosoftFullSummary | null;
   platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -53,7 +55,7 @@ const formatDuration = (minutes: number): string => {
 };
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
+  const { crowdstrike, salesforce, microsoft, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
 
   // Calculate security score from CrowdStrike data
   let securityScore = 100;
@@ -70,6 +72,22 @@ export const Dashboard: FC<Props> = ({ data }) => {
       alerts.bySeverity.low * lowWeight;
     securityScore = Math.max(0, Math.min(100, 100 - totalWeight));
   }
+  if (microsoft) {
+    let msWeight = 0;
+    for (const alert of microsoft.alerts) {
+      const sev = alert.severity?.toLowerCase();
+      if (sev === 'high') msWeight += 5;
+      else if (sev === 'medium') msWeight += 2;
+      else if (sev === 'low') msWeight += 1;
+    }
+    for (const alert of microsoft.defenderAlerts) {
+      const sev = alert.severity?.toLowerCase();
+      if (sev === 'high') msWeight += 5;
+      else if (sev === 'medium') msWeight += 2;
+      else if (sev === 'low') msWeight += 1;
+    }
+    securityScore = Math.max(0, Math.min(100, securityScore - msWeight));
+  }
 
   return (
     <Layout title="Security Dashboard">
@@ -84,7 +102,10 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
           <div class="header-title">
             <h1>Security Operations</h1>
-            <p>CrowdStrike Falcon &bull; Salesforce Service Cloud</p>
+            <p>
+              CrowdStrike Falcon &bull; Salesforce Service Cloud
+              {microsoft && <> &bull; Microsoft Security</>}
+            </p>
           </div>
         </div>
 
@@ -129,7 +150,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         const sfStatus = platforms.find(p => p.platform === 'salesforce');
         const hasErrors = platforms.some(p => p.status === 'error');
         const hasPartialErrors = crowdstrike?.errors && crowdstrike.errors.length > 0;
-        const allNotConfigured = !crowdstrike && !salesforce && !hasErrors;
+        const allNotConfigured = !crowdstrike && !salesforce && !microsoft && !hasErrors;
 
         if (allNotConfigured) {
           return (
@@ -158,6 +179,19 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <strong>Salesforce:</strong> {sfStatus.error_message || 'Unknown error'}
                 </div>
               )}
+              {(() => {
+                const msStatus = platforms.find(p => p.platform === 'microsoft');
+                return msStatus?.status === 'error' ? (
+                  <div style="margin-top: 0.5rem;">
+                    <strong>Microsoft:</strong> {msStatus.error_message || 'Unknown error'}
+                  </div>
+                ) : null;
+              })()}
+              {microsoft?.errors && microsoft.errors.length > 0 && microsoft.errors.map((err, i) => (
+                <div style="margin-top: 0.5rem;" key={`ms-${i}`}>
+                  <strong>Microsoft API:</strong> {err}
+                </div>
+              ))}
             </div>
           );
         }
@@ -165,7 +199,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         return null;
       })()}
 
-      {crowdstrike || salesforce ? (
+      {crowdstrike || salesforce || microsoft ? (
         <>
           {/* Main Grid */}
           <div class="grid">
@@ -184,22 +218,26 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       label="Total Endpoints"
                       value={crowdstrike.hosts.total}
                       trend={csTrends?.hostsTotal ? { ...csTrends.hostsTotal, invertColor: true } : undefined}
+                      source="CS"
                     />
                     <MetricCard
                       label="Online"
                       value={crowdstrike.hosts.online}
                       severity={crowdstrike.hosts.online > 0 ? undefined : 'medium'}
                       trend={csTrends?.hostsOnline ? { ...csTrends.hostsOnline, invertColor: true } : undefined}
+                      source="CS"
                     />
                     <MetricCard
                       label="Contained"
                       value={crowdstrike.hosts.contained}
                       severity={crowdstrike.hosts.contained > 0 ? 'critical' : undefined}
+                      source="CS"
                     />
                     <MetricCard
                       label="Stale (7+ days)"
                       value={crowdstrike.hosts.staleEndpoints}
                       severity={crowdstrike.hosts.staleEndpoints > 0 ? 'medium' : undefined}
+                      source="CS"
                     />
                   </div>
                 </div>
@@ -216,25 +254,30 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     value={crowdstrike.alerts.bySeverity.critical}
                     severity="critical"
                     trend={csTrends?.alertsCritical}
+                    source="CS"
                   />
                   <MetricCard
                     label="High"
                     value={crowdstrike.alerts.bySeverity.high}
                     severity="high"
+                    source="CS"
                   />
                   <MetricCard
                     label="Medium"
                     value={crowdstrike.alerts.bySeverity.medium}
                     severity="medium"
+                    source="CS"
                   />
                   <MetricCard
                     label="Low"
                     value={crowdstrike.alerts.bySeverity.low}
                     severity="low"
+                    source="CS"
                   />
                   <MetricCard
                     label="Informational"
                     value={crowdstrike.alerts.bySeverity.informational}
+                    source="CS"
                   />
                 </div>
               </div>
@@ -249,20 +292,24 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     label="Total Alerts"
                     value={crowdstrike.alerts.total}
                     trend={csTrends?.alertsTotal}
+                    source="CS"
                   />
                   <MetricCard
                     label="New"
                     value={crowdstrike.alerts.byStatus.new}
                     severity={crowdstrike.alerts.byStatus.new > 0 ? 'high' : undefined}
+                    source="CS"
                   />
                   <MetricCard
                     label="In Progress"
                     value={crowdstrike.alerts.byStatus.in_progress}
                     severity={crowdstrike.alerts.byStatus.in_progress > 0 ? 'medium' : undefined}
+                    source="CS"
                   />
                   <MetricCard
                     label="Resolved"
                     value={crowdstrike.alerts.byStatus.resolved}
+                    source="CS"
                   />
                 </div>
               </div>
@@ -278,36 +325,204 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     value={salesforce.openTickets}
                     severity={salesforce.openTickets > 10 ? 'high' : salesforce.openTickets > 5 ? 'medium' : undefined}
                     trend={sfTrends?.openTickets}
+                    source="SF"
                   />
                   <MetricCard
                     label="MTTR"
                     value={formatDuration(salesforce.mttr.overall)}
                     severity={salesforce.mttr.overall > 240 ? 'high' : salesforce.mttr.overall > 120 ? 'medium' : undefined}
                     trend={sfTrends?.mttrOverall}
+                    source="SF"
                   />
                   <MetricCard
                     label="SLA Compliance"
                     value={`${salesforce.slaComplianceRate.toFixed(0)}%`}
                     severity={salesforce.slaComplianceRate < 90 ? 'critical' : salesforce.slaComplianceRate < 95 ? 'medium' : undefined}
                     trend={sfTrends?.slaCompliance ? { ...sfTrends.slaCompliance, invertColor: true } : undefined}
+                    source="SF"
                   />
                   <MetricCard
                     label="Escalation Rate"
                     value={`${salesforce.escalationRate.toFixed(1)}%`}
                     severity={salesforce.escalationRate > 15 ? 'high' : salesforce.escalationRate > 10 ? 'medium' : undefined}
                     trend={sfTrends?.escalationRate}
+                    source="SF"
                   />
                   <MetricCard
                     label="Backlog Age"
                     value={`${salesforce.backlogAging.avgAgeHours.toFixed(0)}h`}
                     severity={salesforce.backlogAging.avgAgeHours > 72 ? 'critical' : salesforce.backlogAging.avgAgeHours > 48 ? 'medium' : undefined}
+                    source="SF"
                   />
                   <MetricCard
                     label="Week Trend"
                     value={`${salesforce.weekOverWeek.changePercent >= 0 ? '+' : ''}${salesforce.weekOverWeek.changePercent.toFixed(0)}%`}
                     severity={salesforce.weekOverWeek.changePercent > 20 ? 'high' : salesforce.weekOverWeek.changePercent > 10 ? 'medium' : undefined}
+                    source="SF"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Row 3b: Microsoft Security Overview */}
+            {microsoft && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">Microsoft Security</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                  <MetricCard
+                    label="Secure Score"
+                    value={microsoft.secureScore
+                      ? `${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%`
+                      : 'N/A'}
+                    source="MS"
+                  />
+                  <MetricCard
+                    label="Entra Alerts"
+                    value={microsoft.alerts.length}
+                    severity={microsoft.alerts.some(a => a.severity?.toLowerCase() === 'high') ? 'high' : undefined}
+                    source="MS"
+                  />
+                  <MetricCard
+                    label="Defender Alerts"
+                    value={microsoft.defenderAlerts.length}
+                    severity={microsoft.defenderAlerts.some(a => a.severity?.toLowerCase() === 'high') ? 'high' : undefined}
+                    source="MS"
+                  />
+                  <MetricCard
+                    label="Compliant Devices"
+                    value={microsoft.compliance.compliant}
+                    source="MS"
+                  />
+                  <MetricCard
+                    label="Non-Compliant"
+                    value={microsoft.compliance.nonCompliant}
+                    severity={microsoft.compliance.nonCompliant > 0 ? 'high' : undefined}
+                    source="MS"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Row 3c: Microsoft Details */}
+            {microsoft && (
+              <>
+                {microsoft.secureScore && (
+                  <div class="card col-4">
+                    <div class="card-title">Microsoft Secure Score</div>
+                    <div class="stat-row">
+                      <span class="stat-label">Current Score</span>
+                      <span class="stat-value">{microsoft.secureScore.currentScore.toFixed(1)}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Max Score</span>
+                      <span class="stat-value">{microsoft.secureScore.maxScore.toFixed(1)}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Percentage</span>
+                      <span class="stat-value">
+                        {((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    {microsoft.secureScore.averageComparativeScores.length > 0 && (
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">Industry Comparison:</div>
+                        {microsoft.secureScore.averageComparativeScores.map((comp) => (
+                          <div class="stat-row" key={comp.basis}>
+                            <span class="stat-label">{comp.basis}</span>
+                            <span class="stat-value">{comp.averageScore.toFixed(1)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div class="card col-4">
+                  <div class="card-title">Device Compliance</div>
+                  <div class="stat-row">
+                    <span class="stat-label">Compliant</span>
+                    <span class="stat-value severity-low">{microsoft.compliance.compliant}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Non-Compliant</span>
+                    <span class="stat-value severity-critical">{microsoft.compliance.nonCompliant}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Unknown</span>
+                    <span class="stat-value">{microsoft.compliance.unknown}</span>
+                  </div>
+                  {(microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown) > 0 && (
+                    <div class="stat-row">
+                      <span class="stat-label">Compliance Rate</span>
+                      <span class="stat-value">
+                        {((microsoft.compliance.compliant / (microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown)) * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div class="card col-4">
+                  <div class="card-title">Security Recommendations ({microsoft.recommendations.length})</div>
+                  {microsoft.recommendations.length > 0 ? (
+                    <div>
+                      <div class="stat-row">
+                        <span class="stat-label">High</span>
+                        <span class="stat-value severity-high">
+                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'high').length}
+                        </span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Medium</span>
+                        <span class="stat-value severity-medium">
+                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'medium').length}
+                        </span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Low</span>
+                        <span class="stat-value">
+                          {microsoft.recommendations.filter(r => r.severity?.toLowerCase() === 'low').length}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p class="no-data">No recommendations available</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Row 3d: Recent Microsoft Alerts */}
+            {microsoft && microsoft.alerts.length > 0 && (
+              <div class="card col-12">
+                <div class="card-title">Recent Microsoft Security Alerts</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>Title</th>
+                      <th>Category</th>
+                      <th>Provider</th>
+                      <th>Status</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {microsoft.alerts.slice(0, 10).map((alert) => (
+                      <tr key={alert.id}>
+                        <td>
+                          <span class={`badge badge-${alert.severity?.toLowerCase() || 'medium'}`}>
+                            {alert.severity || 'Unknown'}
+                          </span>
+                        </td>
+                        <td>{alert.title?.slice(0, 60) || 'N/A'}{alert.title && alert.title.length > 60 ? '...' : ''}</td>
+                        <td>{alert.category || 'N/A'}</td>
+                        <td>{alert.vendorInformation?.provider || 'N/A'}</td>
+                        <td style="text-transform: capitalize;">{alert.status || 'N/A'}</td>
+                        <td>{new Date(alert.createdDateTime).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
@@ -622,26 +837,31 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <MetricCard
                     label="Normal"
                     value={crowdstrike.hosts.byStatus.normal}
+                    source="CS"
                   />
                   <MetricCard
                     label="Contained"
                     value={crowdstrike.hosts.byStatus.contained}
                     severity={crowdstrike.hosts.byStatus.contained > 0 ? 'critical' : undefined}
+                    source="CS"
                   />
                   <MetricCard
                     label="Containment Pending"
                     value={crowdstrike.hosts.byStatus.containment_pending}
                     severity={crowdstrike.hosts.byStatus.containment_pending > 0 ? 'high' : undefined}
+                    source="CS"
                   />
                   <MetricCard
                     label="Lift Pending"
                     value={crowdstrike.hosts.byStatus.lift_containment_pending}
                     severity={crowdstrike.hosts.byStatus.lift_containment_pending > 0 ? 'medium' : undefined}
+                    source="CS"
                   />
                   <MetricCard
                     label="Reduced Mode"
                     value={crowdstrike.hosts.reducedFunctionality}
                     severity={crowdstrike.hosts.reducedFunctionality > 0 ? 'high' : undefined}
+                    source="CS"
                   />
                 </div>
               </div>

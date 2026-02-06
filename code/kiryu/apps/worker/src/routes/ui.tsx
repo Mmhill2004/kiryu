@@ -3,7 +3,7 @@ import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
-import { MicrosoftClient } from '../integrations/microsoft/client';
+import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
 import { TrendService, type CrowdStrikeTrends, type SalesforceTrends } from '../services/trends';
 
@@ -26,6 +26,7 @@ uiRoutes.get('/', async (c) => {
   // Initialize with defaults
   let crowdstrike = null;
   let salesforce: TicketMetrics | null = null;
+  let microsoft: MicrosoftFullSummary | null = null;
   let dataSource: 'cache' | 'live' = 'live';
   let cachedAt: string | null = null;
   let csTrends: CrowdStrikeTrends | null = null;
@@ -104,6 +105,34 @@ uiRoutes.get('/', async (c) => {
     platforms.push({ platform: 'salesforce', status: 'not_configured', last_sync: null });
   }
 
+  // Microsoft: try cache first, then live API
+  if (msClient.isConfigured()) {
+    const msCacheKey = `${CACHE_KEYS.MICROSOFT_SUMMARY}:${period}`;
+
+    fetchPromises.push((async () => {
+      if (!forceRefresh) {
+        const cached = await cache.get<MicrosoftFullSummary>(msCacheKey);
+        if (cached) {
+          microsoft = cached.data;
+          if (!cachedAt) cachedAt = cached.cachedAt;
+          platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: cached.cachedAt });
+          return;
+        }
+      }
+
+      try {
+        microsoft = await msClient.getFullSummary();
+        platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: new Date().toISOString() });
+        await cache.set(msCacheKey, microsoft, CACHE_TTL.DASHBOARD_DATA);
+      } catch (error) {
+        console.error('Microsoft fetch error:', error instanceof Error ? error.message : error);
+        platforms.push({ platform: 'microsoft', status: 'error', last_sync: null, error_message: 'Failed to connect' });
+      }
+    })());
+  } else {
+    platforms.push({ platform: 'microsoft', status: 'not_configured', last_sync: null });
+  }
+
   // Fetch trend data from D1 (fast, no external API calls)
   fetchPromises.push(
     trendService.getCrowdStrikeTrends(daysBack)
@@ -119,29 +148,6 @@ uiRoutes.get('/', async (c) => {
   // Wait for all fetches to complete
   await Promise.all(fetchPromises);
 
-  // Check Microsoft configuration and attempt to show status
-  if (msClient.isConfigured()) {
-    // Microsoft is configured — check platform_status from D1 for last sync info
-    try {
-      const msStatus = await c.env.DB.prepare(
-        `SELECT status, last_sync, metadata FROM platform_status WHERE platform = 'microsoft'`
-      ).first<{ status: string; last_sync: string | null; metadata: string | null }>();
-      if (msStatus) {
-        platforms.push({
-          platform: 'microsoft',
-          status: msStatus.status as 'healthy' | 'error' | 'not_configured' | 'unknown',
-          last_sync: msStatus.last_sync,
-        });
-      } else {
-        platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: null });
-      }
-    } catch {
-      platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: null });
-    }
-  } else {
-    platforms.push({ platform: 'microsoft', status: 'not_configured', last_sync: null });
-  }
-
   // Add other platforms as not configured for now
   platforms.push(
     { platform: 'abnormal', status: 'not_configured', last_sync: null },
@@ -153,6 +159,7 @@ uiRoutes.get('/', async (c) => {
       data={{
         crowdstrike,
         salesforce,
+        microsoft,
         platforms,
         period,
         lastUpdated: new Date().toISOString(),
