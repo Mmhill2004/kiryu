@@ -5,16 +5,58 @@ import { MicrosoftClient } from '../../integrations/microsoft/client';
 export const microsoftRoutes = new Hono<{ Bindings: Env }>();
 
 /**
+ * Test Microsoft connection
+ */
+microsoftRoutes.get('/test', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ status: 'not_configured', message: 'Azure credentials not set' });
+  }
+
+  try {
+    const score = await client.getSecureScore();
+    return c.json({ status: 'connected', secureScore: score ? score.currentScore : 'unavailable' });
+  } catch (error) {
+    return c.json({
+      status: 'error',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get full Microsoft summary (all APIs in parallel)
+ */
+microsoftRoutes.get('/summary', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'Microsoft not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getFullSummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch Microsoft summary',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
  * Get security alerts
  */
 microsoftRoutes.get('/alerts', async (c) => {
   const client = new MicrosoftClient(c.env);
-  
+
   try {
     const alerts = await client.getSecurityAlerts();
     return c.json({ alerts, count: alerts.length });
   } catch (error) {
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch alerts',
       message: 'An internal error occurred'
     }, 500);

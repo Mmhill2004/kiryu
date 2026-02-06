@@ -58,6 +58,7 @@ export class CacheService {
 export const CACHE_KEYS = {
   CROWDSTRIKE_SUMMARY: 'cs:summary',
   SALESFORCE_METRICS: 'sf:metrics',
+  MICROSOFT_SUMMARY: 'ms:summary',
   CROWDSTRIKE_TOKEN: 'auth:cs:token',
   SALESFORCE_TOKEN: 'auth:sf:token',
   REPORT_GENERATED: 'report:generated',

@@ -179,6 +179,51 @@ const TOOLS = [
     },
   },
   {
+    name: "get_microsoft_summary",
+    description:
+      "Get a full Microsoft security summary including Entra security alerts, Defender for Endpoint alerts, Secure Score, Cloud Defender recommendations, and device compliance — all in one call.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_microsoft_alerts",
+    description:
+      "Get Microsoft Entra / Graph Security alerts (alert v2 API). Returns recent security alerts from Microsoft 365 and Azure AD.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_microsoft_defender_alerts",
+    description:
+      "Get Microsoft Defender for Endpoint alerts. Returns recent endpoint detection alerts from Windows Defender ATP.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_microsoft_compliance",
+    description:
+      "Get device compliance status from Microsoft Intune. Shows counts of compliant, non-compliant, and unknown devices.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_microsoft_recommendations",
+    description:
+      "Get Azure Cloud Defender security recommendations/assessments. Shows security posture recommendations with severity and status.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
     name: "get_ngsiem_summary",
     description:
       "Get CrowdStrike NGSIEM/LogScale metrics including repository counts, data ingest volumes, saved searches, and recent event activity. Use this to understand log management and SIEM capabilities.",
@@ -327,6 +372,26 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_microsoft_secure_score": {
       return apiRequest("/api/integrations/microsoft/secure-score");
+    }
+
+    case "get_microsoft_summary": {
+      return apiRequest("/api/integrations/microsoft/summary");
+    }
+
+    case "get_microsoft_alerts": {
+      return apiRequest("/api/integrations/microsoft/alerts");
+    }
+
+    case "get_microsoft_defender_alerts": {
+      return apiRequest("/api/integrations/microsoft/defender/alerts");
+    }
+
+    case "get_microsoft_compliance": {
+      return apiRequest("/api/integrations/microsoft/compliance");
+    }
+
+    case "get_microsoft_recommendations": {
+      return apiRequest("/api/integrations/microsoft/recommendations");
     }
 
     case "get_ngsiem_summary": {

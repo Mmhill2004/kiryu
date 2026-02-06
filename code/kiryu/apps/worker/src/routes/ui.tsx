@@ -3,6 +3,7 @@ import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
+import { MicrosoftClient } from '../integrations/microsoft/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
 import { TrendService, type CrowdStrikeTrends, type SalesforceTrends } from '../services/trends';
 
@@ -38,6 +39,7 @@ uiRoutes.get('/', async (c) => {
 
   const csClient = new CrowdStrikeClient(c.env, c.env.CACHE);
   const sfClient = new SalesforceClient(c.env, c.env.CACHE);
+  const msClient = new MicrosoftClient(c.env);
   const trendService = new TrendService(c.env);
 
   const fetchPromises: Promise<void>[] = [];
@@ -117,11 +119,33 @@ uiRoutes.get('/', async (c) => {
   // Wait for all fetches to complete
   await Promise.all(fetchPromises);
 
+  // Check Microsoft configuration and attempt to show status
+  if (msClient.isConfigured()) {
+    // Microsoft is configured — check platform_status from D1 for last sync info
+    try {
+      const msStatus = await c.env.DB.prepare(
+        `SELECT status, last_sync, metadata FROM platform_status WHERE platform = 'microsoft'`
+      ).first<{ status: string; last_sync: string | null; metadata: string | null }>();
+      if (msStatus) {
+        platforms.push({
+          platform: 'microsoft',
+          status: msStatus.status as 'healthy' | 'error' | 'not_configured' | 'unknown',
+          last_sync: msStatus.last_sync,
+        });
+      } else {
+        platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: null });
+      }
+    } catch {
+      platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: null });
+    }
+  } else {
+    platforms.push({ platform: 'microsoft', status: 'not_configured', last_sync: null });
+  }
+
   // Add other platforms as not configured for now
   platforms.push(
     { platform: 'abnormal', status: 'not_configured', last_sync: null },
     { platform: 'zscaler', status: 'not_configured', last_sync: null },
-    { platform: 'microsoft', status: 'not_configured', last_sync: null },
   );
 
   return c.html(

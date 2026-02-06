@@ -37,7 +37,8 @@ export class SyncService {
     // Invalidate dashboard cache after sync so next page load gets fresh data
     try {
       const cacheKeys = ['cs:summary:24h', 'cs:summary:7d', 'cs:summary:30d', 'cs:summary:90d',
-                         'sf:metrics:24h', 'sf:metrics:7d', 'sf:metrics:30d', 'sf:metrics:90d'];
+                         'sf:metrics:24h', 'sf:metrics:7d', 'sf:metrics:30d', 'sf:metrics:90d',
+                         'ms:summary:24h', 'ms:summary:7d', 'ms:summary:30d', 'ms:summary:90d'];
       await Promise.all(cacheKeys.map(k => this.env.CACHE.delete(k)));
     } catch { /* ignore cache errors */ }
 
@@ -303,19 +304,19 @@ export class SyncService {
   }
 
   private async syncMicrosoft(): Promise<SyncResult> {
-    if (!this.env.AZURE_CLIENT_ID || !this.env.AZURE_CLIENT_SECRET) {
+    if (!this.env.AZURE_CLIENT_ID || !this.env.AZURE_CLIENT_SECRET || !this.env.AZURE_TENANT_ID) {
       return { platform: 'microsoft', status: 'skipped', error: 'Not configured' };
     }
 
     const client = new MicrosoftClient(this.env);
-    const alerts = await client.getSecurityAlerts();
-    const secureScore = await client.getSecureScore();
-    
+    const summary = await client.getFullSummary();
+
     let recordsSynced = 0;
 
-    for (const alert of alerts) {
+    // Store Graph security alerts
+    for (const alert of summary.alerts) {
       await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events 
+        INSERT OR REPLACE INTO security_events
         (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
         VALUES (?, 'microsoft', 'security_alert', ?, ?, ?, 1, ?, ?)
       `).bind(
@@ -329,20 +330,60 @@ export class SyncService {
       recordsSynced++;
     }
 
-    // Store secure score
-    if (secureScore) {
+    // Store Defender for Endpoint alerts
+    for (const alert of summary.defenderAlerts) {
       await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO metrics 
+        INSERT OR REPLACE INTO security_events
+        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+        VALUES (?, 'microsoft', 'defender_alert', ?, ?, ?, 1, ?, ?)
+      `).bind(
+        `defender_${alert.id}`,
+        alert.severity?.toLowerCase() || 'medium',
+        alert.title || 'Defender Alert',
+        `Classification: ${alert.classification || 'unknown'}`,
+        JSON.stringify(alert),
+        alert.createdDateTime
+      ).run();
+      recordsSynced++;
+    }
+
+    // Store secure score
+    if (summary.secureScore) {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO metrics
         (id, source, metric_type, value, metadata, recorded_at)
         VALUES ('microsoft_secure_score', 'microsoft', 'secure_score', ?, ?, ?)
       `).bind(
-        secureScore.currentScore,
-        JSON.stringify({ maxScore: secureScore.maxScore }),
+        summary.secureScore.currentScore,
+        JSON.stringify({ maxScore: summary.secureScore.maxScore, comparativeScores: summary.secureScore.averageComparativeScores }),
         new Date().toISOString()
       ).run();
     }
 
-    await this.updatePlatformStatus('microsoft', 'healthy');
+    // Store device compliance
+    const totalDevices = summary.compliance.compliant + summary.compliance.nonCompliant + summary.compliance.unknown;
+    if (totalDevices > 0) {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO metrics
+        (id, source, metric_type, value, metadata, recorded_at)
+        VALUES ('microsoft_compliance', 'microsoft', 'device_compliance', ?, ?, ?)
+      `).bind(
+        totalDevices,
+        JSON.stringify(summary.compliance),
+        new Date().toISOString()
+      ).run();
+    }
+
+    await this.updatePlatformStatus('microsoft', 'healthy', {
+      security_alerts: summary.alerts.length,
+      defender_alerts: summary.defenderAlerts.length,
+      secure_score: summary.secureScore?.currentScore || null,
+      compliant_devices: summary.compliance.compliant,
+      non_compliant_devices: summary.compliance.nonCompliant,
+      recommendations: summary.recommendations.length,
+      errors: summary.errors,
+    });
+
     return { platform: 'microsoft', status: 'success', recordsSynced };
   }
 
