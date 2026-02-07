@@ -166,7 +166,7 @@ Full implementation with:
 Displays:
 - Security Score (calculated from CS + MS alert severity)
 - Platform source labels (CS/SF/MS) on all MetricCards
-- **CrowdStrike**: Endpoint Overview, Active Alerts by severity, Alert Status, Host Containment, Incidents, ZTA, NGSIEM, OverWatch
+- **CrowdStrike**: Endpoint Overview, Active Alerts by severity, Alert Status, MITRE Tactics/Techniques, Endpoints by Platform, Host Containment, Recent Alerts table
 - **Salesforce**: Service Desk Metrics (open tickets, MTTR, SLA, escalation rate), Tickets by Priority, Backlog Aging, Agent Workload
 - **Microsoft**: 6 KPI cards (Secure Score, Active Alerts, Risky Users, Open Incidents, Managed Endpoints, Cloud Pass Rate), Entra Alert Breakdown, Defender for Endpoint detail, Identity Risk, Security Incidents, Defender Machines, Cloud Security & Compliance, Recent MS Alerts table, Recent MS Incidents table
 - Recent CrowdStrike alerts and Salesforce tickets tables
