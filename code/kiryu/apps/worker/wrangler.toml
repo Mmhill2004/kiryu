@@ -37,24 +37,6 @@ LOG_LEVEL = "info"
 SYNC_INTERVAL_MINUTES = "15"
 MAX_RECORDS_PER_SYNC = "1000"
 
-# Staging environment
-[env.staging]
-name = "security-dashboard-api-staging"
-vars = { ENVIRONMENT = "staging", LOG_LEVEL = "debug" }
-
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "security-dashboard-db-staging"
-database_id = "YOUR_STAGING_DATABASE_ID"
-
-[[env.staging.r2_buckets]]
-binding = "REPORTS_BUCKET"
-bucket_name = "security-reports-staging"
-
-[[env.staging.kv_namespaces]]
-binding = "CACHE"
-id = "YOUR_STAGING_KV_ID"
-
 # Note: Sensitive credentials should be added as secrets using:
 # wrangler secret put CROWDSTRIKE_CLIENT_ID
 # wrangler secret put CROWDSTRIKE_CLIENT_SECRET
