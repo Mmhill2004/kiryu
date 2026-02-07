@@ -334,6 +334,40 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
+## TypeScript
+
+Strict mode is enabled with `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`:
+```bash
+# Check types (must use worker tsconfig for JSX/Workers types)
+cd apps/worker && npx tsc -p tsconfig.json --noEmit
+
+# Verify bundle compiles
+cd apps/worker && npx wrangler deploy src/index.ts --dry-run
+```
+
+Key type patterns:
+- `AppContext` (from `types/env.ts`) must be used for all Hono handlers/middleware — provides `Variables.requestId`
+- `ContentfulStatusCode` (from `hono/utils/http-status`) for `ApiError.statusCode` — Hono's `c.json()` rejects 1xx codes
+- `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
+- Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
+
+## Performance & Stability
+
+### Fetch Timeouts
+All external API calls have AbortController timeouts:
+- OAuth token fetches: 10s timeout
+- Data API requests: 20s timeout
+- Dashboard platform fetches: 25s timeout (in `ui.tsx`)
+
+### OAuth In-Flight Dedup
+All three OAuth clients (CS, SF, MS) deduplicate concurrent auth requests via `pendingAuth` promise tracking — prevents thundering herd on token expiry.
+
+### Batched Database Operations
+Sync service uses `DB.batch()` for all bulk inserts instead of sequential statements. Data retention cleanup runs batched DELETEs with `LIMIT 500` to avoid locking.
+
+### Cache Invalidation
+`CacheService.invalidatePrefix()` uses cursor-based pagination to handle >1000 keys per prefix.
+
 ## Key Patterns
 
 ### KV Cache-First Loading

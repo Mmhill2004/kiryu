@@ -10,7 +10,7 @@ export const salesforceRoutes = new Hono<{ Bindings: Env }>();
  * Test Salesforce connection
  */
 salesforceRoutes.get('/test', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -28,7 +28,7 @@ salesforceRoutes.get('/test', async (c) => {
  * Get recent security tickets
  */
 salesforceRoutes.get('/tickets', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -60,7 +60,7 @@ salesforceRoutes.get('/tickets', async (c) => {
  * Get comprehensive ticket metrics for dashboard
  */
 salesforceRoutes.get('/metrics', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -88,7 +88,7 @@ salesforceRoutes.get('/metrics', async (c) => {
  * Get open tickets with aging info
  */
 salesforceRoutes.get('/open', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -120,7 +120,7 @@ salesforceRoutes.get('/open', async (c) => {
  * Get MTTR breakdown
  */
 salesforceRoutes.get('/mttr', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -154,7 +154,7 @@ salesforceRoutes.get('/mttr', async (c) => {
  * Get agent workload
  */
 salesforceRoutes.get('/workload', async (c) => {
-  const client = new SalesforceClient(c.env);
+  const client = new SalesforceClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({

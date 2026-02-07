@@ -9,7 +9,7 @@ export const crowdstrikeRoutes = new Hono<{ Bindings: Env }>();
  * Test CrowdStrike connection and list available modules
  */
 crowdstrikeRoutes.get('/test', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({
@@ -33,7 +33,7 @@ crowdstrikeRoutes.get('/test', async (c) => {
  * Get full summary for dashboard (all modules)
  */
 crowdstrikeRoutes.get('/summary', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const alertDays = safeInt(c.req.query('alert_days'), 7, 90);
   const incidentDays = safeInt(c.req.query('incident_days'), 30, 90);
 
@@ -60,7 +60,7 @@ crowdstrikeRoutes.get('/summary', async (c) => {
  * Get alert summary with MITRE ATT&CK breakdown
  */
 crowdstrikeRoutes.get('/alerts', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const daysBack = safeInt(c.req.query('days'), 7, 90);
   const limit = safeInt(c.req.query('limit'), 500, 500);
 
@@ -83,7 +83,7 @@ crowdstrikeRoutes.get('/alerts', async (c) => {
  * Get raw alerts list
  */
 crowdstrikeRoutes.get('/alerts/list', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const daysBack = safeInt(c.req.query('days'), 7, 90);
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
@@ -110,7 +110,7 @@ crowdstrikeRoutes.get('/alerts/list', async (c) => {
  * Get host/endpoint summary
  */
 crowdstrikeRoutes.get('/hosts', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -131,7 +131,7 @@ crowdstrikeRoutes.get('/hosts', async (c) => {
  * Get raw hosts list
  */
 crowdstrikeRoutes.get('/hosts/list', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
@@ -157,7 +157,7 @@ crowdstrikeRoutes.get('/hosts/list', async (c) => {
  * Get incident summary with MTTR
  */
 crowdstrikeRoutes.get('/incidents', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const daysBack = safeInt(c.req.query('days'), 30, 90);
 
   if (!client.isConfigured()) {
@@ -179,7 +179,7 @@ crowdstrikeRoutes.get('/incidents', async (c) => {
  * Get raw incidents list
  */
 crowdstrikeRoutes.get('/incidents/list', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const daysBack = safeInt(c.req.query('days'), 30, 90);
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
@@ -206,7 +206,7 @@ crowdstrikeRoutes.get('/incidents/list', async (c) => {
  * Get NGSIEM summary
  */
 crowdstrikeRoutes.get('/ngsiem', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -231,7 +231,7 @@ crowdstrikeRoutes.get('/ngsiem', async (c) => {
  * Get OverWatch threat hunting summary
  */
 crowdstrikeRoutes.get('/overwatch', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -256,7 +256,7 @@ crowdstrikeRoutes.get('/overwatch', async (c) => {
  * Test all CrowdStrike API scopes and report availability
  */
 crowdstrikeRoutes.get('/diagnostic', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -283,7 +283,7 @@ crowdstrikeRoutes.get('/diagnostic', async (c) => {
  * Get CrowdScore threat level
  */
 crowdstrikeRoutes.get('/crowdscore', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -308,7 +308,7 @@ crowdstrikeRoutes.get('/crowdscore', async (c) => {
  * Get vulnerability summary with aggregates
  */
 crowdstrikeRoutes.get('/vulnerabilities', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -329,7 +329,7 @@ crowdstrikeRoutes.get('/vulnerabilities', async (c) => {
  * Get raw vulnerability list
  */
 crowdstrikeRoutes.get('/vulnerabilities/list', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {
@@ -355,7 +355,7 @@ crowdstrikeRoutes.get('/vulnerabilities/list', async (c) => {
  * Get Identity Protection detection summary
  */
 crowdstrikeRoutes.get('/identity', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -376,7 +376,7 @@ crowdstrikeRoutes.get('/identity', async (c) => {
  * Get raw Identity Protection detections
  */
 crowdstrikeRoutes.get('/identity/detections', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 50, 100);
 
   if (!client.isConfigured()) {
@@ -402,7 +402,7 @@ crowdstrikeRoutes.get('/identity/detections', async (c) => {
  * Get Discover asset summary
  */
 crowdstrikeRoutes.get('/discover', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -427,7 +427,7 @@ crowdstrikeRoutes.get('/discover', async (c) => {
  * Get sensor usage trends
  */
 crowdstrikeRoutes.get('/sensors', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -452,7 +452,7 @@ crowdstrikeRoutes.get('/sensors', async (c) => {
  * Get intel summary (actors, indicators, reports)
  */
 crowdstrikeRoutes.get('/intel', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -473,7 +473,7 @@ crowdstrikeRoutes.get('/intel', async (c) => {
  * Get threat actors
  */
 crowdstrikeRoutes.get('/intel/actors', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 20, 50);
 
   if (!client.isConfigured()) {
@@ -495,7 +495,7 @@ crowdstrikeRoutes.get('/intel/actors', async (c) => {
  * Get intel reports
  */
 crowdstrikeRoutes.get('/intel/reports', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 10, 50);
 
   if (!client.isConfigured()) {
@@ -521,7 +521,7 @@ crowdstrikeRoutes.get('/intel/reports', async (c) => {
  * Get a specific alert by composite ID
  */
 crowdstrikeRoutes.get('/alerts/:id', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const alertId = c.req.param('id');
 
   if (!client.isConfigured()) {
@@ -551,7 +551,7 @@ crowdstrikeRoutes.get('/alerts/:id', async (c) => {
  * Get ZTA summary
  */
 crowdstrikeRoutes.get('/zta', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
 
   if (!client.isConfigured()) {
     return c.json({ error: 'CrowdStrike not configured' }, 503);
@@ -572,7 +572,7 @@ crowdstrikeRoutes.get('/zta', async (c) => {
  * Get raw ZTA scores
  */
 crowdstrikeRoutes.get('/zta/list', async (c) => {
-  const client = new CrowdStrikeClient(c.env);
+  const client = new CrowdStrikeClient(c.env, c.env.CACHE);
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
   if (!client.isConfigured()) {

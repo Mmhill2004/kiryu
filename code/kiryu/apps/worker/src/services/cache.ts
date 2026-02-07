@@ -47,8 +47,12 @@ export class CacheService {
 
   async invalidatePrefix(prefix: string): Promise<void> {
     try {
-      const list = await this.kv.list({ prefix });
-      await Promise.all(list.keys.map((k: { name: string }) => this.kv.delete(k.name)));
+      let cursor: string | undefined;
+      do {
+        const list = await this.kv.list({ prefix, cursor });
+        await Promise.all(list.keys.map((k: { name: string }) => this.kv.delete(k.name)));
+        cursor = list.list_complete ? undefined : list.cursor;
+      } while (cursor);
     } catch (error) {
       console.error(`Cache invalidate prefix error for ${prefix}:`, error);
     }
