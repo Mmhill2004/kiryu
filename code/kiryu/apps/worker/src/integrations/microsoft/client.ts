@@ -245,19 +245,54 @@ export class MicrosoftClient {
   private graphUrl = 'https://graph.microsoft.com/v1.0';
   private securityUrl = 'https://api.securitycenter.microsoft.com/api';
   private tokens: Map<string, MicrosoftToken> = new Map();
+  private pendingAuth: Map<string, Promise<string>> = new Map();
+  private kv: KVNamespace | null;
 
-  constructor(private env: Env) {}
+  constructor(private env: Env) {
+    this.kv = env.CACHE || null;
+  }
 
   isConfigured(): boolean {
     return !!(this.env.AZURE_TENANT_ID && this.env.AZURE_CLIENT_ID && this.env.AZURE_CLIENT_SECRET);
   }
 
   private async authenticate(scope = 'https://graph.microsoft.com/.default'): Promise<string> {
+    // 1. Check in-memory cache
     const cached = this.tokens.get(scope);
     if (cached && cached.expires_at > Date.now()) {
       return cached.access_token;
     }
 
+    // 2. Deduplicate concurrent auth calls for the same scope
+    const pending = this.pendingAuth.get(scope);
+    if (pending) return pending;
+
+    const authPromise = this.authenticateInner(scope);
+    this.pendingAuth.set(scope, authPromise);
+    try {
+      return await authPromise;
+    } finally {
+      this.pendingAuth.delete(scope);
+    }
+  }
+
+  private async authenticateInner(scope: string): Promise<string> {
+    // 3. Check KV cache
+    const kvKey = `auth:ms:token:${scope.replace(/[^a-zA-Z]/g, '_')}`;
+    if (this.kv) {
+      try {
+        const kvRaw = await this.kv.get(kvKey, 'text');
+        if (kvRaw) {
+          const kvToken = JSON.parse(kvRaw) as MicrosoftToken;
+          if (kvToken.expires_at > Date.now()) {
+            this.tokens.set(scope, kvToken);
+            return kvToken.access_token;
+          }
+        }
+      } catch { /* KV miss, continue to fetch */ }
+    }
+
+    // 4. Fetch fresh token
     const tokenUrl = `https://login.microsoftonline.com/${this.env.AZURE_TENANT_ID}/oauth2/v2.0/token`;
 
     const response = await fetch(tokenUrl, {
@@ -273,7 +308,7 @@ export class MicrosoftClient {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Microsoft authentication failed: ${error}`);
+      throw new Error(`Microsoft authentication failed for scope ${scope}: ${error}`);
     }
 
     const data = await response.json() as { access_token: string; expires_in: number };
@@ -284,13 +319,24 @@ export class MicrosoftClient {
       expires_at: Date.now() + (data.expires_in * 1000) - 60000,
     };
 
+    // Cache in memory
     this.tokens.set(scope, token);
+
+    // Cache in KV (TTL = token lifetime minus 2 min buffer)
+    if (this.kv) {
+      const kvTtl = Math.max(60, data.expires_in - 120);
+      try {
+        await this.kv.put(kvKey, JSON.stringify(token), { expirationTtl: kvTtl });
+      } catch { /* non-fatal */ }
+    }
+
     return token.access_token;
   }
 
   private async graphRequest<T>(endpoint: string): Promise<T> {
     const token = await this.authenticate();
-    const response = await fetch(`${this.graphUrl}${endpoint}`, {
+    const url = `${this.graphUrl}${endpoint}`;
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -299,7 +345,7 @@ export class MicrosoftClient {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Graph API ${response.status}: ${error}`);
+      throw new Error(`Graph API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
     }
 
     return response.json() as Promise<T>;
@@ -307,7 +353,8 @@ export class MicrosoftClient {
 
   private async securityRequest<T>(endpoint: string): Promise<T> {
     const token = await this.authenticate('https://api.securitycenter.microsoft.com/.default');
-    const response = await fetch(`${this.securityUrl}${endpoint}`, {
+    const url = `${this.securityUrl}${endpoint}`;
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -316,7 +363,7 @@ export class MicrosoftClient {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Security API ${response.status}: ${error}`);
+      throw new Error(`Defender API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
     }
 
     return response.json() as Promise<T>;
@@ -366,20 +413,15 @@ export class MicrosoftClient {
   }
 
   async getSecureScore(): Promise<SecureScore | null> {
-    try {
-      const response = await this.graphRequest<{ value: SecureScore[] }>(
-        '/security/secureScores?$top=1'
-      );
-      return response.value?.[0] || null;
-    } catch (error) {
-      console.warn('Failed to get secure score:', error);
-      return null;
-    }
+    const response = await this.graphRequest<{ value: SecureScore[] }>(
+      '/security/secureScores?$top=1'
+    );
+    return response.value?.[0] || null;
   }
 
   async getDefenderAnalytics(): Promise<DefenderAnalytics> {
     const response = await this.securityRequest<{ value: DefenderAlert[] }>(
-      '/alerts?$top=100&$orderby=createdTime desc'
+      '/alerts?$top=100&$orderby=alertCreationTime desc'
     );
     const alerts = response.value || [];
 
@@ -466,20 +508,15 @@ export class MicrosoftClient {
   }
 
   async getDeviceCompliance(): Promise<DeviceCompliance> {
-    try {
-      const response = await this.graphRequest<{ value: Array<{ complianceState: string }> }>(
-        '/deviceManagement/managedDevices?$select=complianceState'
-      );
-      const devices = response.value || [];
-      return {
-        compliant: devices.filter(d => d.complianceState === 'compliant').length,
-        nonCompliant: devices.filter(d => d.complianceState === 'noncompliant').length,
-        unknown: devices.filter(d => !['compliant', 'noncompliant'].includes(d.complianceState)).length,
-      };
-    } catch (error) {
-      console.warn('Failed to get device compliance:', error);
-      return { compliant: 0, nonCompliant: 0, unknown: 0 };
-    }
+    const response = await this.graphRequest<{ value: Array<{ complianceState: string }> }>(
+      '/deviceManagement/managedDevices?$select=complianceState'
+    );
+    const devices = response.value || [];
+    return {
+      compliant: devices.filter(d => d.complianceState === 'compliant').length,
+      nonCompliant: devices.filter(d => d.complianceState === 'noncompliant').length,
+      unknown: devices.filter(d => !['compliant', 'noncompliant'].includes(d.complianceState)).length,
+    };
   }
 
   // ─── Phase 2: New high-value methods ────────────────────────────────────
@@ -519,7 +556,7 @@ export class MicrosoftClient {
 
   async getIncidentAnalytics(): Promise<IncidentAnalytics> {
     const response = await this.graphRequest<{ value: MicrosoftIncident[] }>(
-      '/security/incidents?$top=100&$orderby=createdDateTime desc'
+      '/security/incidents?$top=50&$orderby=createdDateTime desc'
     );
     const incidents = response.value || [];
 

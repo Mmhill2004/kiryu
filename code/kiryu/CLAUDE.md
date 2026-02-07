@@ -37,7 +37,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 |----------|--------|-------|
 | **CrowdStrike** | ✅ Active | Alerts, Hosts, Incidents, ZTA, NGSIEM/LogScale, OverWatch |
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
-| **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance |
+| **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
 | **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
 | **Zscaler** | ⚪ Stubbed | Client ready, needs credentials |
 | **Cloudflare** | ⚪ Stubbed | Access/Gateway logs, needs API token |
@@ -48,7 +48,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Framework**: Hono (API + JSX views)
 - **Interactivity**: htmx
 - **Database**: Cloudflare D1 (SQLite)
-- **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth, per-scope MS OAuth)
+- **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth, 58 min per-scope MS OAuth)
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
@@ -93,7 +93,7 @@ kiryu/
 │   ├── integrations/         # API clients
 │   │   ├── crowdstrike/client.ts  # Full: Alerts, Hosts, Incidents, ZTA, NGSIEM, OverWatch
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
-│   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations
+│   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations, Risky Users, Incidents, Machines
 │   │   ├── abnormal/client.ts     # Stubbed
 │   │   ├── zscaler/client.ts      # Stubbed
 │   │   └── cloudflare/client.ts   # Stubbed
@@ -122,14 +122,19 @@ Full implementation with 6 modules:
 - `getFullSummary()` - All 6 modules in parallel
 
 ### Microsoft Client (`integrations/microsoft/client.ts`)
-Full implementation with 5 modules across 3 API surfaces:
-- OAuth2 client credentials flow with per-scope token caching (Graph, Defender, Management)
-- `getSecurityAlerts()` - Entra / Graph Security alerts (alerts_v2 API)
-- `getSecureScore()` - Microsoft Secure Score
-- `getDefenderAlerts()` - Defender for Endpoint alerts (Security Center API)
-- `getSecurityRecommendations()` - Cloud Defender assessments (Azure Management API, subscription-scoped if `AZURE_SUBSCRIPTION_ID` set)
-- `getDeviceCompliance()` - Intune device compliance (compliant/nonCompliant/unknown)
-- `getFullSummary()` - All 5 modules in parallel with error isolation
+Full implementation with 8 modules across 3 API surfaces, returning pre-computed analytics (matching CrowdStrike pattern):
+- OAuth2 client credentials flow with KV-backed per-scope token caching + in-flight dedup (Graph, Defender, Management)
+- `getAlertAnalytics()` - Entra / Graph Security alerts with severity/status/category breakdowns (alerts_v2 API)
+- `getSecureScore()` - Microsoft Secure Score (current/max/percentage + industry comparison)
+- `getDefenderAnalytics()` - Defender for Endpoint alerts with severity/detection source breakdowns (Security Center API)
+- `getAssessmentAnalytics()` - Cloud Defender assessments with pass rate and severity breakdown (Azure Management API)
+- `getDeviceCompliance()` - Intune device compliance (compliant/nonCompliant/unknown + compliance rate)
+- `getIdentityRisk()` - Entra ID risky users by risk level and state (Graph API)
+- `getIncidentAnalytics()` - Microsoft security incidents by severity/status/determination (Graph API, $top=50 limit)
+- `getMachineAnalytics()` - Defender machines by risk score, exposure level, health status, and OS (Security Center API)
+- `getFullSummary()` - All 8 modules in parallel with error isolation via `Promise.allSettled`
+- Helper utilities: `countBy<T>()` for grouping, `sevBucket()` for severity normalization
+- Pre-computed analytics types: `AlertAnalytics`, `DefenderAnalytics`, `IdentityRiskSummary`, `IncidentAnalytics`, `MachineAnalytics`, `AssessmentAnalytics`
 
 ### Salesforce Client (`integrations/salesforce/client.ts`)
 Full implementation with:
@@ -150,16 +155,13 @@ Full implementation with:
 
 ### Dashboard (`views/Dashboard.tsx`)
 Displays:
-- Security Score (calculated from alert severity)
-- Endpoint Overview with trend indicators
-- Active Alerts by severity with trend indicators
-- Service Desk Metrics (open tickets, MTTR, SLA, escalation rate) with trends
-- Incidents, ZTA, NGSIEM, OverWatch cards
-- Tickets by Priority, Backlog Aging, Agent Workload
-- Recent alerts and tickets tables
-- Platform status
-- Cache indicator (cached vs live, with force-refresh link)
-- Report link to latest executive report
+- Security Score (calculated from CS + MS alert severity)
+- Platform source labels (CS/SF/MS) on all MetricCards
+- **CrowdStrike**: Endpoint Overview, Active Alerts by severity, Alert Status, Host Containment, Incidents, ZTA, NGSIEM, OverWatch
+- **Salesforce**: Service Desk Metrics (open tickets, MTTR, SLA, escalation rate), Tickets by Priority, Backlog Aging, Agent Workload
+- **Microsoft**: 6 KPI cards (Secure Score, Active Alerts, Risky Users, Open Incidents, Managed Endpoints, Cloud Pass Rate), Entra Alert Breakdown, Defender for Endpoint detail, Identity Risk, Security Incidents, Defender Machines, Cloud Security & Compliance, Recent MS Alerts table, Recent MS Incidents table
+- Recent CrowdStrike alerts and Salesforce tickets tables
+- Platform status, Cache indicator, Report link
 
 ### Report Template (`views/ReportTemplate.tsx`)
 Self-contained HTML report with inline CSS:
@@ -201,11 +203,11 @@ Self-contained HTML report with inline CSS:
 
 ### Microsoft
 - `GET /api/integrations/microsoft/test` - Test connection
-- `GET /api/integrations/microsoft/summary` - Full summary (all 5 modules)
-- `GET /api/integrations/microsoft/alerts` - Entra security alerts
-- `GET /api/integrations/microsoft/defender/alerts` - Defender for Endpoint alerts
+- `GET /api/integrations/microsoft/summary` - Full summary (all 8 modules, pre-computed analytics)
+- `GET /api/integrations/microsoft/alerts` - Entra security alert analytics
+- `GET /api/integrations/microsoft/defender/alerts` - Defender for Endpoint analytics
 - `GET /api/integrations/microsoft/secure-score` - Microsoft Secure Score
-- `GET /api/integrations/microsoft/recommendations` - Cloud Defender assessments
+- `GET /api/integrations/microsoft/recommendations` - Cloud Defender assessment analytics
 - `GET /api/integrations/microsoft/compliance` - Device compliance
 
 ### Salesforce
@@ -243,7 +245,7 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 | `get_crowdstrike_detections` | Endpoint detection details |
 | `get_email_threats` | Abnormal email threats |
 | `get_microsoft_secure_score` | Microsoft 365/Azure secure score |
-| `get_microsoft_summary` | Full Microsoft security summary (all 5 modules) |
+| `get_microsoft_summary` | Full Microsoft security summary (all 8 modules, pre-computed analytics) |
 | `get_microsoft_alerts` | Entra / Graph Security alerts |
 | `get_microsoft_defender_alerts` | Defender for Endpoint alerts |
 | `get_microsoft_compliance` | Intune device compliance status |
@@ -321,6 +323,14 @@ if (cached && !refresh) return c.html(<Dashboard data={{ ...cached, dataSource: 
   trend={{ direction: 'down', changePercent: 15, invertColor: true }} />
 ```
 
+### MetricCard Source Labels
+```typescript
+// MetricCard accepts optional source prop to show platform origin
+<MetricCard label="Active Alerts" value={12} source="CS" />  // CrowdStrike
+<MetricCard label="Open Tickets" value={42} source="SF" />   // Salesforce
+<MetricCard label="Secure Score" value="78%" source="MS" />  // Microsoft
+```
+
 ### Integration Client Pattern
 ```typescript
 export class PlatformClient {
@@ -345,6 +355,9 @@ cd apps/worker && npx wrangler deploy src/index.ts
 ### Salesforce "request not supported on this domain"
 -> Use your My Domain URL (e.g., `https://yourorg.my.salesforce.com`) not `login.salesforce.com`
 
+### Microsoft authentication failed / AADSTS7000215 invalid_client
+-> The `AZURE_CLIENT_SECRET` must be the **Secret Value** (shown once at creation), NOT the Secret ID. Go to App Registrations → Certificates & secrets → create a new secret if the value is no longer visible.
+
 ### Microsoft authentication failed / 401 errors
 -> Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET are set correctly. Ensure admin consent was granted for all API permissions in the Azure portal.
 
@@ -359,6 +372,12 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### curl returns 302 redirect to production
 -> All endpoints except /health are behind Cloudflare Zero Trust. Use the dashboard UI or MCP server for authenticated access.
+
+### Microsoft Risky Users / Incidents return empty
+-> Ensure the app registration has `IdentityRiskyUser.Read.All` and `SecurityIncident.Read.All` permissions with admin consent granted in the Azure portal.
+
+### Microsoft Defender Machines return empty
+-> Ensure the app registration has `WindowsDefenderATP Machine.Read.All` permission with admin consent. Uses the Security Center API scope (`api.securitycenter.microsoft.com/.default`).
 
 ### Deploy fails with "No project was selected"
 -> Run from `apps/worker/` directory: `npx wrangler deploy src/index.ts` (not `pnpm deploy` from root)

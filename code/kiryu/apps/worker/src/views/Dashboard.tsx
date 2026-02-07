@@ -142,7 +142,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         const csStatus = platforms.find(p => p.platform === 'crowdstrike');
         const sfStatus = platforms.find(p => p.platform === 'salesforce');
         const hasErrors = platforms.some(p => p.status === 'error');
-        const hasPartialErrors = crowdstrike?.errors && crowdstrike.errors.length > 0;
+        const hasPartialErrors = (crowdstrike?.errors && crowdstrike.errors.length > 0) || (microsoft?.errors && microsoft.errors.length > 0);
         const allNotConfigured = !crowdstrike && !salesforce && !microsoft && !hasErrors;
 
         if (allNotConfigured) {
