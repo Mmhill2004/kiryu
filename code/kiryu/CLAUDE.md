@@ -35,7 +35,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| **CrowdStrike** | ✅ Active | 12 modules: Alerts, Hosts, Incidents, CrowdScore, Spotlight Vulns, ZTA, NGSIEM, OverWatch, Identity Protection, Discover, Sensor Usage, Threat Intel |
+| **CrowdStrike** | ✅ Active | 12 available: Alerts, Hosts, Incidents, CrowdScore, Spotlight Vulns, ZTA, Identity Protection, Discover, Sensor Usage, Intel (Actors/Indicators/Reports). NGSIEM + OverWatch: 404 (not provisioned). Prevention Policies: 403 (no scope). |
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
 | **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
 | **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
@@ -57,7 +57,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 ## Common Commands
 
 ```bash
-# Development (starts on :8787)
+# Local development (starts on :8787, uses .dev.vars for secrets, local D1/KV/R2)
 pnpm dev
 
 # Deploy to Cloudflare
@@ -123,9 +123,9 @@ Full implementation with 12 modules:
 - `getZTASummary()` - Zero Trust Assessment scores
 - `getNGSIEMSummary()` - LogScale repositories, saved searches, data ingest
 - `getOverWatchSummary()` - Threat hunting detections, escalations, coverage
-- `getIdentityDetectionSummary()` - Identity Protection via GraphQL: detections by severity/type, targeted accounts
-- `getDiscoverSummary()` - Asset inventory: managed/unmanaged assets, sensor coverage %
-- `getSensorUsage()` - Weekly sensor deployment trends
+- `getIdentityDetectionSummary()` - Identity Protection via alerts API (`product:'idp'` filter): detections by severity/type, targeted accounts
+- `getDiscoverSummary()` - Asset inventory: managed/unmanaged assets, sensor coverage % (uses timestamp-based FQL filters)
+- `getSensorUsage()` - Sensor count derived from hosts API (dedicated endpoint not available)
 - `getIntelSummary()` - Threat actors, IOC count, recent intel reports
 - `runDiagnostic()` - Tests all 15 API scopes, reports availability matrix
 - `getFullSummary()` - All 12 modules in parallel via `Promise.allSettled`
@@ -399,10 +399,19 @@ cd apps/worker && npx wrangler deploy src/index.ts
 -> Check API client scopes in Falcon console. Use the `/api/integrations/crowdstrike/diagnostic` endpoint to see which scopes are accessible. Required scopes: Alerts, Hosts, Incidents, Spotlight, ZTA, NGSIEM, OverWatch, Identity Protection, Discover, Sensor Usage, Intel Actors/Indicators/Reports.
 
 ### CrowdStrike Identity Protection returns empty
--> Ensure the API client has both "Identity Protection Entities (Read)" and "Identity Protection GraphQL (Write)" scopes enabled. The GraphQL Write scope is required for all IDP queries.
+-> IDP detections are fetched via the alerts API with `product:'idp'` filter (the GraphQL `detections` query type was deprecated). Ensure the "Alerts (Read)" scope is enabled. If still empty, there may be no IDP alerts in the last 30 days.
 
 ### CrowdStrike Spotlight returns empty
 -> Spotlight API requires a FQL filter — empty filter returns nothing. The client always passes `status:'open'` as minimum. If still empty, ensure the "Vulnerabilities / Spotlight (Read)" scope is enabled.
+
+### CrowdStrike Discover "invalid filter" / "operator not allowed"
+-> Discover API FQL filters do not support `id:>'0'`. Use timestamp-based filters (e.g., `last_seen_timestamp:>='...'`). The client already handles this.
+
+### CrowdStrike Sensor Usage 404
+-> The `/sensor-usage/combined/weekly/v1` endpoint is not available. Sensor count is derived from the hosts API instead.
+
+### CrowdStrike NGSIEM / OverWatch 404
+-> These modules return 404 if LogScale or OverWatch are not provisioned in the CrowdStrike instance. The diagnostic endpoint reports which modules are available. These fail gracefully in `getFullSummary()` (NGSIEM/OverWatch use default empty values).
 
 ### curl returns 302 redirect to production
 -> All endpoints except /health are behind Cloudflare Zero Trust. Use the dashboard UI or MCP server for authenticated access.
@@ -412,6 +421,12 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### Microsoft Defender Machines return empty
 -> Ensure the app registration has `WindowsDefenderATP Machine.Read.All` permission with admin consent. Uses the Security Center API scope (`api.securitycenter.microsoft.com/.default`).
+
+### Local dev with `wrangler dev --remote` requires cloudflared
+-> Install `cloudflared` via `brew install cloudflared`. The worker is behind Cloudflare Access, so `--remote` needs a tunnel. Alternatively, use `wrangler dev` (local mode) which uses `.dev.vars` secrets and local D1/KV/R2 preview bindings.
+
+### Testing production endpoints via curl
+-> Use `cloudflared access token -app="https://security-dashboard-api.rodgersbuilders.workers.dev"` to get a CF Access JWT, then pass it as: `curl -H "cookie: CF_Authorization=$TOKEN" https://security-dashboard-api.rodgersbuilders.workers.dev/api/...`
 
 ### Deploy fails with "No project was selected"
 -> Run from `apps/worker/` directory: `npx wrangler deploy src/index.ts` (not `pnpm deploy` from root)
