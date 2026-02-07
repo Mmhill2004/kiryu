@@ -25,7 +25,7 @@ reportRoutes.get('/latest', async (c) => {
   }
 
   // Reports are sorted by key (YYYY-MM), get the last one
-  const latest = reports.sort((a, b) => b.key.localeCompare(a.key))[0];
+  const latest = reports.sort((a, b) => b.key.localeCompare(a.key))[0]!;
   const html = await reportService.getReport(latest.key);
 
   if (!html) {
@@ -60,7 +60,7 @@ reportRoutes.get('/:yearMonth', async (c) => {
  * Generate a report for a specific month
  */
 reportRoutes.post('/generate', async (c) => {
-  const body = await c.req.json<{ year?: number; month?: number }>().catch(() => ({}));
+  const body = await c.req.json<{ year?: number; month?: number }>().catch(() => ({} as { year?: number; month?: number }));
 
   // Default to previous month
   const now = new Date();

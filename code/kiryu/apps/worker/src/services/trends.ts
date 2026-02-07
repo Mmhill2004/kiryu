@@ -48,8 +48,8 @@ export class TrendService {
       midpoint.setDate(midpoint.getDate() - periodDays);
       const midpointStr = midpoint.toISOString().split('T')[0];
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr);
+      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
+      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
 
       if (current.length === 0) return null;
 
@@ -87,8 +87,8 @@ export class TrendService {
       midpoint.setDate(midpoint.getDate() - periodDays);
       const midpointStr = midpoint.toISOString().split('T')[0];
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr);
+      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
+      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
 
       if (current.length === 0) return null;
 

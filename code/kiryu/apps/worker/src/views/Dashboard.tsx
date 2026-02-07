@@ -380,7 +380,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       <MetricCard
                         label="IDP Detections"
                         value={crowdstrike.identity ? crowdstrike.identity.total : 'N/A'}
-                        severity={crowdstrike.identity && crowdstrike.identity.bySeverity.critical > 0 ? 'critical' : crowdstrike.identity && crowdstrike.identity.bySeverity.high > 0 ? 'high' : undefined}
+                        severity={crowdstrike.identity && (crowdstrike.identity.bySeverity.critical ?? 0) > 0 ? 'critical' : crowdstrike.identity && (crowdstrike.identity.bySeverity.high ?? 0) > 0 ? 'high' : undefined}
                         source="CS"
                       />
                       <MetricCard

@@ -1,13 +1,14 @@
 import { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import type { Env } from '../types/env';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { AppContext } from '../types/env';
 
 /**
  * Custom error class for API errors
  */
 export class ApiError extends Error {
   constructor(
-    public statusCode: number,
+    public statusCode: ContentfulStatusCode,
     message: string,
     public code?: string,
     public details?: unknown
@@ -20,7 +21,7 @@ export class ApiError extends Error {
 /**
  * Global error handler for the Hono app
  */
-export function errorHandler(err: Error, c: Context<{ Bindings: Env }>) {
+export function errorHandler(err: Error, c: Context<AppContext>) {
   const requestId = c.get('requestId') || 'unknown';
   
   console.error(`[${requestId}] Error:`, {
@@ -71,27 +72,27 @@ export function errorHandler(err: Error, c: Context<{ Bindings: Env }>) {
  * Helper to create common API errors
  */
 export const Errors = {
-  notFound: (resource: string) => 
-    new ApiError(404, `${resource} not found`, 'NOT_FOUND'),
-  
-  badRequest: (message: string, details?: unknown) => 
-    new ApiError(400, message, 'BAD_REQUEST', details),
-  
-  unauthorized: (message = 'Unauthorized') => 
-    new ApiError(401, message, 'UNAUTHORIZED'),
-  
-  forbidden: (message = 'Forbidden') => 
-    new ApiError(403, message, 'FORBIDDEN'),
-  
-  conflict: (message: string) => 
-    new ApiError(409, message, 'CONFLICT'),
-  
-  rateLimit: () => 
-    new ApiError(429, 'Rate limit exceeded', 'RATE_LIMIT'),
-  
-  integrationError: (integration: string, message: string, details?: unknown) => 
-    new ApiError(502, `${integration} integration error: ${message}`, 'INTEGRATION_ERROR', details),
-  
-  internal: (message = 'Internal server error') => 
-    new ApiError(500, message, 'INTERNAL_ERROR'),
+  notFound: (resource: string) =>
+    new ApiError(404 as ContentfulStatusCode, `${resource} not found`, 'NOT_FOUND'),
+
+  badRequest: (message: string, details?: unknown) =>
+    new ApiError(400 as ContentfulStatusCode, message, 'BAD_REQUEST', details),
+
+  unauthorized: (message = 'Unauthorized') =>
+    new ApiError(401 as ContentfulStatusCode, message, 'UNAUTHORIZED'),
+
+  forbidden: (message = 'Forbidden') =>
+    new ApiError(403 as ContentfulStatusCode, message, 'FORBIDDEN'),
+
+  conflict: (message: string) =>
+    new ApiError(409 as ContentfulStatusCode, message, 'CONFLICT'),
+
+  rateLimit: () =>
+    new ApiError(429 as ContentfulStatusCode, 'Rate limit exceeded', 'RATE_LIMIT'),
+
+  integrationError: (integration: string, message: string, details?: unknown) =>
+    new ApiError(502 as ContentfulStatusCode, `${integration} integration error: ${message}`, 'INTEGRATION_ERROR', details),
+
+  internal: (message = 'Internal server error') =>
+    new ApiError(500 as ContentfulStatusCode, message, 'INTERNAL_ERROR'),
 };

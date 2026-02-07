@@ -78,7 +78,7 @@ export class ZscalerClient {
   /**
    * Obfuscate API key (Zscaler-specific)
    */
-  private obfuscateApiKey(apiKey: string, timestamp: string): string {
+  private obfuscateApiKey(apiKey: string, _timestamp: string): string {
     // Note: This is a placeholder. Zscaler has specific obfuscation requirements.
     // Refer to Zscaler API documentation for the actual implementation.
     return apiKey;

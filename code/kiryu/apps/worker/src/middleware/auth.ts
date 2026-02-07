@@ -1,11 +1,11 @@
 import { Context, Next } from 'hono';
-import type { Env } from '../types/env';
+import type { AppContext } from '../types/env';
 
 /**
  * API Key authentication middleware
  * Checks for valid API key in X-API-Key header or Authorization header
  */
-export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+export async function authMiddleware(c: Context<AppContext>, next: Next) {
   const apiKey = c.req.header('X-API-Key') || extractBearerToken(c.req.header('Authorization'));
 
   if (!apiKey) {
@@ -77,7 +77,7 @@ async function secureCompare(a: string, b: string): Promise<boolean> {
   const viewB = new Uint8Array(sigB);
   let result = 0;
   for (let i = 0; i < viewA.length; i++) {
-    result |= viewA[i] ^ viewB[i];
+    result |= (viewA[i]! ^ viewB[i]!);
   }
   return result === 0;
 }

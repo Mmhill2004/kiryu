@@ -1491,7 +1491,7 @@ export class CrowdStrikeClient {
       return { current: 0, adjusted: 0, level: 'low', trend: [] };
     }
 
-    const latest = scores[0];
+    const latest = scores[0]!;
     const current = latest.score || 0;
     const level = current >= 80 ? 'critical' : current >= 60 ? 'high' : current >= 40 ? 'medium' : 'low';
 

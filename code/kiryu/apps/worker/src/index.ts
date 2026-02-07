@@ -20,10 +20,10 @@ import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/error';
 
 // Types
-import type { Env } from './types/env';
+import type { Env, AppContext } from './types/env';
 
 // Create the main Hono app
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppContext>();
 
 // Global middleware
 app.use('*', logger());
@@ -73,7 +73,7 @@ export default {
   fetch: app.fetch,
   
   // Scheduled handler for cron triggers
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     console.log(`Cron triggered at ${new Date(event.scheduledTime).toISOString()}`);
 
     // Import sync service dynamically to avoid circular dependencies

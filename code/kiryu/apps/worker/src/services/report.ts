@@ -1,6 +1,5 @@
 import type { Env } from '../types/env';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
-import { SalesforceClient } from '../integrations/salesforce/client';
 import { renderReport } from '../views/ReportTemplate';
 
 export interface ReportData {
@@ -52,23 +51,6 @@ export interface ReportData {
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
-
-const TACTIC_DESCRIPTIONS: Record<string, string> = {
-  'Reconnaissance': 'Gathering information about the organization to plan an attack',
-  'Resource Development': 'Building infrastructure or acquiring tools for an attack',
-  'Initial Access': 'Attempting to gain first entry into the network',
-  'Execution': 'Running malicious code on compromised systems',
-  'Persistence': 'Maintaining a foothold in the environment',
-  'Privilege Escalation': 'Attempting to gain higher-level permissions',
-  'Defense Evasion': 'Trying to avoid detection by security tools',
-  'Credential Access': 'Stealing usernames, passwords, or authentication tokens',
-  'Discovery': 'Mapping out the network and identifying valuable targets',
-  'Lateral Movement': 'Moving between systems after initial compromise',
-  'Collection': 'Gathering data of interest before exfiltration',
-  'Command and Control': 'Communicating with compromised systems from outside',
-  'Exfiltration': 'Stealing data from the network',
-  'Impact': 'Disrupting or destroying systems and data',
-};
 
 export class ReportService {
   constructor(private env: Env) {}
@@ -134,7 +116,6 @@ export class ReportService {
       const vals = arr.map(r => (r[field] as number) || 0);
       return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     };
-    const sum = (arr: any[], field: string) => arr.reduce((s, r) => s + ((r[field] as number) || 0), 0);
     const last = (arr: any[], field: string) => arr.length > 0 ? (arr[arr.length - 1][field] as number) || 0 : 0;
 
     // Parse metadata from last row for tactics
@@ -172,39 +153,39 @@ export class ReportService {
           const live = await csClient.getFullSummary(30, 30);
           csRows = [{
             alerts_total: live.alerts.total,
-            alerts_critical: live.alerts.bySeverity.critical,
-            alerts_high: live.alerts.bySeverity.high,
-            alerts_medium: live.alerts.bySeverity.medium,
-            alerts_low: live.alerts.bySeverity.low,
+            alerts_critical: live.alerts.bySeverity.critical ?? 0,
+            alerts_high: live.alerts.bySeverity.high ?? 0,
+            alerts_medium: live.alerts.bySeverity.medium ?? 0,
+            alerts_low: live.alerts.bySeverity.low ?? 0,
             hosts_total: live.hosts.total,
             hosts_online: live.hosts.online,
             hosts_contained: live.hosts.contained,
             hosts_stale: live.hosts.staleEndpoints,
-            hosts_windows: live.hosts.byPlatform.windows,
-            hosts_mac: live.hosts.byPlatform.mac,
-            hosts_linux: live.hosts.byPlatform.linux,
+            hosts_windows: live.hosts.byPlatform.windows ?? 0,
+            hosts_mac: live.hosts.byPlatform.mac ?? 0,
+            hosts_linux: live.hosts.byPlatform.linux ?? 0,
             incidents_total: live.incidents.total,
             incidents_open: live.incidents.open,
             incidents_closed: live.incidents.closed,
             incidents_with_lateral_movement: live.incidents.withLateralMovement,
             incidents_mttr_hours: live.incidents.mttr,
-            incidents_critical: live.incidents.bySeverity.critical,
-            incidents_high: live.incidents.bySeverity.high,
-            incidents_medium: live.incidents.bySeverity.medium,
-            incidents_low: live.incidents.bySeverity.low,
+            incidents_critical: live.incidents.bySeverity.critical ?? 0,
+            incidents_high: live.incidents.bySeverity.high ?? 0,
+            incidents_medium: live.incidents.bySeverity.medium ?? 0,
+            incidents_low: live.incidents.bySeverity.low ?? 0,
             overwatch_total_detections: live.overwatch.totalDetections,
             overwatch_active_escalations: live.overwatch.activeEscalations,
             overwatch_resolved_30d: live.overwatch.resolvedLast30Days,
-            overwatch_critical: live.overwatch.detectionsBySeverity.critical,
-            overwatch_high: live.overwatch.detectionsBySeverity.high,
-            overwatch_medium: live.overwatch.detectionsBySeverity.medium,
-            overwatch_low: live.overwatch.detectionsBySeverity.low,
+            overwatch_critical: live.overwatch.detectionsBySeverity.critical ?? 0,
+            overwatch_high: live.overwatch.detectionsBySeverity.high ?? 0,
+            overwatch_medium: live.overwatch.detectionsBySeverity.medium ?? 0,
+            overwatch_low: live.overwatch.detectionsBySeverity.low ?? 0,
             ngsiem_events_total: live.ngsiem.eventCounts.total,
             ngsiem_repositories: live.ngsiem.repositories,
             ngsiem_total_ingest_gb: live.ngsiem.totalIngestGB,
             security_score: Math.max(0, Math.min(100,
-              100 - (live.alerts.bySeverity.critical * 10 + live.alerts.bySeverity.high * 5
-                + live.alerts.bySeverity.medium * 2 + live.alerts.bySeverity.low * 1))),
+              100 - ((live.alerts.bySeverity.critical ?? 0) * 10 + (live.alerts.bySeverity.high ?? 0) * 5
+                + (live.alerts.bySeverity.medium ?? 0) * 2 + (live.alerts.bySeverity.low ?? 0) * 1))),
             metadata: JSON.stringify({ byTactic: live.alerts.byTactic }),
           }];
           byTactic = live.alerts.byTactic;
@@ -294,7 +275,7 @@ export class ReportService {
   private generateRecommendations(data: ReportData): string[] {
     const recs: string[] = [];
 
-    if (data.alerts.bySeverity.critical > 0) {
+    if ((data.alerts.bySeverity.critical ?? 0) > 0) {
       recs.push(`Address ${data.alerts.bySeverity.critical} critical security alerts requiring immediate attention. Critical alerts indicate active threats or significant vulnerabilities that could lead to a breach.`);
     }
 
@@ -338,7 +319,7 @@ export class ReportService {
 
   async listReports(): Promise<Array<{ key: string; uploaded: string; size: number }>> {
     const list = await this.env.REPORTS_BUCKET.list({ prefix: 'reports/' });
-    return list.objects.map(obj => ({
+    return list.objects.map((obj: { key: string; uploaded: Date; size: number }) => ({
       key: obj.key,
       uploaded: obj.uploaded.toISOString(),
       size: obj.size,
