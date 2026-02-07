@@ -35,7 +35,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| **CrowdStrike** | ✅ Active | Alerts, Hosts, Incidents, ZTA, NGSIEM/LogScale, OverWatch |
+| **CrowdStrike** | ✅ Active | 12 modules: Alerts, Hosts, Incidents, CrowdScore, Spotlight Vulns, ZTA, NGSIEM, OverWatch, Identity Protection, Discover, Sensor Usage, Threat Intel |
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
 | **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
 | **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
@@ -52,7 +52,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 22 tools
+- **AI Integration**: MCP server with 28 tools
 
 ## Common Commands
 
@@ -67,6 +67,7 @@ cd apps/worker && npx wrangler deploy src/index.ts
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0001_initial_schema.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0002_salesforce_tickets.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0003_metrics_and_retention.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0004_expanded_cs_metrics.sql --remote
 
 # Add secrets
 wrangler secret put SECRET_NAME --name security-dashboard-api
@@ -91,7 +92,7 @@ kiryu/
 │   │   ├── sync.ts           # Manual sync trigger
 │   │   └── integrations/     # Per-platform API routes
 │   ├── integrations/         # API clients
-│   │   ├── crowdstrike/client.ts  # Full: Alerts, Hosts, Incidents, ZTA, NGSIEM, OverWatch
+│   │   ├── crowdstrike/client.ts  # Full: 12 modules (see Key Files below)
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
 │   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations, Risky Users, Incidents, Machines
 │   │   ├── abnormal/client.ts     # Stubbed
@@ -104,22 +105,30 @@ kiryu/
 │   │   └── report.ts         # Monthly report generation + R2 storage
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
-├── packages/db/migrations/   # D1 SQL migrations (3 files)
-└── mcp-servers/security-dashboard/  # MCP server (16 tools)
+├── packages/db/migrations/   # D1 SQL migrations (4 files)
+└── mcp-servers/security-dashboard/  # MCP server (28 tools)
 ```
 
 ## Key Files
 
 ### CrowdStrike Client (`integrations/crowdstrike/client.ts`)
-Full implementation with 6 modules:
+Full implementation with 12 modules:
 - OAuth2 token caching (KV-backed, 29 min TTL)
 - `getAlertSummary()` - Alerts by severity, status, MITRE ATT&CK tactics
+- `getAlertAggregates()` - Fast server-side alert counts via aggregates API
 - `getHostSummary()` - Endpoints by platform, containment status
-- `getIncidentSummary()` - Open/closed, lateral movement, MTTR
+- `getIncidentSummary()` - Open/closed, lateral movement, MTTR (deprecated March 2026)
+- `getCrowdScore()` - CrowdScore threat level (0-100) with trend sparkline
+- `getVulnerabilitySummary()` - Spotlight: severity, exploit status, ExPRT ratings, top CVEs
 - `getZTASummary()` - Zero Trust Assessment scores
 - `getNGSIEMSummary()` - LogScale repositories, saved searches, data ingest
 - `getOverWatchSummary()` - Threat hunting detections, escalations, coverage
-- `getFullSummary()` - All 6 modules in parallel
+- `getIdentityDetectionSummary()` - Identity Protection via GraphQL: detections by severity/type, targeted accounts
+- `getDiscoverSummary()` - Asset inventory: managed/unmanaged assets, sensor coverage %
+- `getSensorUsage()` - Weekly sensor deployment trends
+- `getIntelSummary()` - Threat actors, IOC count, recent intel reports
+- `runDiagnostic()` - Tests all 15 API scopes, reports availability matrix
+- `getFullSummary()` - All 12 modules in parallel via `Promise.allSettled`
 
 ### Microsoft Client (`integrations/microsoft/client.ts`)
 Full implementation with 8 modules across 3 API surfaces, returning pre-computed analytics (matching CrowdStrike pattern):
@@ -187,8 +196,10 @@ Self-contained HTML report with inline CSS:
 - `GET /api/dashboard/executive-summary` - Plain-language summary for AI consumption
 
 ### CrowdStrike
-- `GET /api/integrations/crowdstrike/test` - Test connection
-- `GET /api/integrations/crowdstrike/summary` - Full summary (all 6 modules)
+- `GET /api/integrations/crowdstrike/test` - Test connection + list available modules
+- `GET /api/integrations/crowdstrike/diagnostic` - Test all API scopes, report availability matrix
+- `GET /api/integrations/crowdstrike/summary` - Full summary (all 12 modules)
+- `GET /api/integrations/crowdstrike/crowdscore` - CrowdScore threat level (0-100) with trend
 - `GET /api/integrations/crowdstrike/alerts` - Alert summary with MITRE breakdown
 - `GET /api/integrations/crowdstrike/alerts/list` - Raw alerts list
 - `GET /api/integrations/crowdstrike/alerts/:id` - Single alert by composite ID
@@ -196,6 +207,15 @@ Self-contained HTML report with inline CSS:
 - `GET /api/integrations/crowdstrike/hosts/list` - Raw hosts list
 - `GET /api/integrations/crowdstrike/incidents` - Incident summary with MTTR
 - `GET /api/integrations/crowdstrike/incidents/list` - Raw incidents list
+- `GET /api/integrations/crowdstrike/vulnerabilities` - Spotlight vulnerability summary (aggregates)
+- `GET /api/integrations/crowdstrike/vulnerabilities/list` - Raw vulnerability list
+- `GET /api/integrations/crowdstrike/identity` - Identity Protection detection summary
+- `GET /api/integrations/crowdstrike/identity/detections` - Raw IDP detections
+- `GET /api/integrations/crowdstrike/discover` - Asset inventory summary
+- `GET /api/integrations/crowdstrike/sensors` - Sensor usage trends
+- `GET /api/integrations/crowdstrike/intel` - Threat intelligence summary
+- `GET /api/integrations/crowdstrike/intel/actors` - Threat actors list
+- `GET /api/integrations/crowdstrike/intel/reports` - Intel reports list
 - `GET /api/integrations/crowdstrike/ngsiem` - NGSIEM/LogScale summary
 - `GET /api/integrations/crowdstrike/overwatch` - OverWatch threat hunting summary
 - `GET /api/integrations/crowdstrike/zta` - Zero Trust Assessment summary
@@ -232,7 +252,7 @@ Self-contained HTML report with inline CSS:
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 22 tools:
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 28 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -242,7 +262,7 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 | `get_platform_status` | Health/sync status of all platforms |
 | `get_ticket_metrics` | Salesforce service desk KPIs |
 | `trigger_sync` | Manual data sync (one or all platforms) |
-| `get_crowdstrike_detections` | Endpoint detection details |
+| `get_crowdstrike_detections` | Endpoint alert details (alerts/list) |
 | `get_email_threats` | Abnormal email threats |
 | `get_microsoft_secure_score` | Microsoft 365/Azure secure score |
 | `get_microsoft_summary` | Full Microsoft security summary (all 8 modules, pre-computed analytics) |
@@ -257,6 +277,13 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 | `list_reports` | List available R2 reports |
 | `get_executive_summary` | Plain-language security narrative |
 | `investigate_alert` | Deep dive into a specific CrowdStrike alert |
+| `get_crowdscore` | CrowdScore threat level (0-100) with trend |
+| `get_vulnerability_summary` | Spotlight vulnerability counts, exploit status, top CVEs |
+| `get_identity_detections` | Identity Protection detections by severity/type |
+| `get_discover_summary` | Asset discovery: managed/unmanaged, sensor coverage % |
+| `get_sensor_usage` | Weekly sensor deployment trends |
+| `get_intel_summary` | Threat actors, IOC count, recent intel reports |
+| `get_crowdstrike_diagnostic` | Test all CrowdStrike API scopes, report availability |
 
 ## Database Schema
 
@@ -271,7 +298,7 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 - `sync_logs` - Sync operation history
 - `audit_logs` - Audit trail
 - `ticket_metrics_daily` - Daily Salesforce ticket KPIs
-- `crowdstrike_metrics_daily` - Daily CrowdStrike snapshots (~50 columns across 6 modules)
+- `crowdstrike_metrics_daily` - Daily CrowdStrike snapshots (~68 columns across 12 modules)
 - `data_retention_log` - Tracks automated cleanup runs (90-day retention)
 
 ## Environment Variables
@@ -298,6 +325,7 @@ DASHBOARD_API_KEY
 
 ### Optional (for additional integrations)
 ```bash
+CROWDSTRIKE_BASE_URL         # Region override (default: https://api.crowdstrike.com)
 AZURE_SUBSCRIPTION_ID        # Scope Cloud Defender recommendations to a subscription
 ABNORMAL_API_TOKEN
 ZSCALER_API_KEY
@@ -368,7 +396,13 @@ cd apps/worker && npx wrangler deploy src/index.ts
 -> Set `AZURE_SUBSCRIPTION_ID` secret to scope the query to a specific subscription. The provider-level endpoint may return empty without subscription context.
 
 ### CrowdStrike 403 errors
--> Check API client scopes in Falcon console, ensure read access to alerts/hosts/incidents
+-> Check API client scopes in Falcon console. Use the `/api/integrations/crowdstrike/diagnostic` endpoint to see which scopes are accessible. Required scopes: Alerts, Hosts, Incidents, Spotlight, ZTA, NGSIEM, OverWatch, Identity Protection, Discover, Sensor Usage, Intel Actors/Indicators/Reports.
+
+### CrowdStrike Identity Protection returns empty
+-> Ensure the API client has both "Identity Protection Entities (Read)" and "Identity Protection GraphQL (Write)" scopes enabled. The GraphQL Write scope is required for all IDP queries.
+
+### CrowdStrike Spotlight returns empty
+-> Spotlight API requires a FQL filter — empty filter returns nothing. The client always passes `status:'open'` as minimum. If still empty, ensure the "Vulnerabilities / Spotlight (Read)" scope is enabled.
 
 ### curl returns 302 redirect to production
 -> All endpoints except /health are behind Cloudflare Zero Trust. Use the dashboard UI or MCP server for authenticated access.
