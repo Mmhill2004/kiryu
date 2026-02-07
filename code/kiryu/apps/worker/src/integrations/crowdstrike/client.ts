@@ -1522,58 +1522,45 @@ export class CrowdStrikeClient {
   }
 
   // ============================================
-  // IDENTITY PROTECTION API (GraphQL)
+  // IDENTITY PROTECTION API (via Alerts with product:'idp' filter)
   // ============================================
 
   /**
-   * Execute an Identity Protection GraphQL query
-   */
-  private async idpGraphQL<T>(query: string): Promise<T> {
-    const response = await this.request<{ data: T }>(
-      '/identity-protection/combined/graphql/v1',
-      {
-        method: 'POST',
-        body: JSON.stringify({ query }),
-      }
-    );
-    return response.data;
-  }
-
-  /**
-   * Get Identity Protection detections
+   * Get Identity Protection detections via the alerts API
+   * Note: IDP GraphQL "detections" query is no longer supported.
+   * Instead we filter alerts by product:'idp'.
    */
   async getIdentityDetections(limit = 50): Promise<IDPDetection[]> {
-    const data = await this.idpGraphQL<{
-      detections: {
-        nodes: Array<{
-          id: string;
-          timestamp: string;
-          severity: string;
-          type: string;
-          description: string;
-          sourceAccount: { displayName: string; domain: string } | null;
-          targetAccount: { displayName: string; domain: string } | null;
-          sourceEndpoint: { hostname: string; ip: string } | null;
-        }>;
-        totalCount: number;
-      };
-    }>(`{
-      detections(first: ${limit}, sortBy: TIMESTAMP, sortOrder: DESC) {
-        nodes {
-          id
-          timestamp
-          severity
-          type
-          description
-          sourceAccount { displayName domain }
-          targetAccount { displayName domain }
-          sourceEndpoint { hostname ip }
-        }
-        totalCount
-      }
-    }`);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    const filter = `product:'idp'+created_timestamp:>='${startDate.toISOString()}'`;
 
-    return data.detections?.nodes || [];
+    const queryResponse = await this.request<{ resources: string[]; meta: { pagination: { total: number } } }>(
+      `/alerts/queries/alerts/v2?limit=${limit}&sort=created_timestamp|desc&filter=${encodeURIComponent(filter)}`
+    );
+
+    if (!queryResponse.resources || queryResponse.resources.length === 0) {
+      return [];
+    }
+
+    const detailsResponse = await this.request<{ resources: Alert[] }>(
+      '/alerts/entities/alerts/v2',
+      {
+        method: 'POST',
+        body: JSON.stringify({ composite_ids: queryResponse.resources }),
+      }
+    );
+
+    return (detailsResponse.resources || []).map(alert => ({
+      id: alert.composite_id,
+      timestamp: alert.created_timestamp,
+      severity: alert.severity_name || String(alert.severity),
+      type: alert.tactic || alert.scenario || 'unknown',
+      description: alert.description || alert.name || '',
+      sourceAccount: null,
+      targetAccount: alert.username ? { displayName: alert.username, domain: '' } : null,
+      sourceEndpoint: alert.hostname ? { hostname: alert.hostname, ip: '' } : null,
+    }));
   }
 
   /**
@@ -1620,15 +1607,18 @@ export class CrowdStrikeClient {
    * Get Discover asset summary — managed vs unmanaged, sensor coverage
    */
   async getDiscoverSummary(): Promise<DiscoverSummary> {
-    // Discover API requires a filter — use minimum filter
-    const filter = encodeURIComponent("id:>'0'");
+    // Discover API requires a FQL filter — use last_seen_timestamp as safe minimum filter
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const appFilter = encodeURIComponent(`last_used_timestamp:>='${ninetyDaysAgo.toISOString()}'`);
+    const hostFilter = encodeURIComponent(`last_seen_timestamp:>='${ninetyDaysAgo.toISOString()}'`);
 
     const [appsResponse, unmanagedResponse, managedCountResponse] = await Promise.all([
       this.request<{ meta: { pagination: { total: number } } }>(
-        `/discover/combined/applications/v1?limit=1&filter=${filter}`
+        `/discover/combined/applications/v1?limit=1&filter=${appFilter}`
       ),
       this.request<{ meta: { pagination: { total: number } } }>(
-        `/discover/combined/hosts/v1?limit=1&filter=${filter}`
+        `/discover/combined/hosts/v1?limit=1&filter=${hostFilter}`
       ),
       this.request<{ meta: { pagination: { total: number } } }>(
         '/devices/queries/devices/v1?limit=1'
@@ -1649,18 +1639,20 @@ export class CrowdStrikeClient {
   // ============================================
 
   /**
-   * Get weekly sensor usage trends
+   * Get sensor usage derived from host counts
+   * Note: /sensor-usage/combined/weekly/v1 is not available; we derive from hosts API
    */
   async getSensorUsage(): Promise<SensorUsageSummary> {
-    const response = await this.request<{ resources: Array<Record<string, unknown>> }>(
-      '/sensor-usage/combined/weekly/v1'
-    );
-
-    const weeks = response.resources || [];
+    const hostSummary = await this.getHostSummary();
     return {
-      totalSensors: (weeks[0] as any)?.total_sensor_count || 0,
-      currentWeek: weeks[0] || null,
-      trend: weeks.slice(0, 12),
+      totalSensors: hostSummary.total,
+      currentWeek: {
+        total: hostSummary.total,
+        online: hostSummary.online,
+        offline: hostSummary.offline,
+        byPlatform: hostSummary.byPlatform,
+      },
+      trend: [],
     };
   }
 
@@ -1745,9 +1737,9 @@ export class CrowdStrikeClient {
       { module: 'ZTA', endpoint: '/zero-trust-assessment/entities/assessments/v1?ids=test' },
       { module: 'NGSIEM', endpoint: '/loggingreadonly/combined/repos/v1?limit=1' },
       { module: 'OverWatch', endpoint: '/overwatch-dashboards/aggregates/detections-global-counts/v1' },
-      { module: 'Identity Protection', endpoint: '/identity-protection/combined/graphql/v1', method: 'POST', body: JSON.stringify({ query: '{ detections(first: 1) { totalCount } }' }) },
-      { module: 'Discover', endpoint: `/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent("id:>'0'")}` },
-      { module: 'Sensor Usage', endpoint: '/sensor-usage/combined/weekly/v1' },
+      { module: 'Identity Protection', endpoint: `/alerts/queries/alerts/v2?limit=1&filter=${encodeURIComponent("product:'idp'")}` },
+      { module: 'Discover', endpoint: `/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent(`last_used_timestamp:>='${new Date(Date.now() - 90 * 86400000).toISOString()}'`)}` },
+      { module: 'Sensor Usage (via Hosts)', endpoint: '/devices/queries/devices/v1?limit=1' },
       { module: 'Intel Actors', endpoint: '/intel/queries/actors/v1?limit=1' },
       { module: 'Intel Indicators', endpoint: '/intel/queries/indicators/v1?limit=1' },
       { module: 'Intel Reports', endpoint: '/intel/queries/reports/v1?limit=1' },
@@ -1968,21 +1960,14 @@ export class CrowdStrikeClient {
       } catch { /* Module not available */ }
 
       try {
-        await this.request('/identity-protection/combined/graphql/v1', {
-          method: 'POST',
-          body: JSON.stringify({ query: '{ detections(first: 1) { totalCount } }' }),
-        });
+        await this.request(`/alerts/queries/alerts/v2?limit=1&filter=${encodeURIComponent("product:'idp'")}`);
         modules.push('Identity Protection');
       } catch { /* Module not available */ }
 
       try {
-        await this.request(`/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent("id:>'0'")}`);
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
+        await this.request(`/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent(`last_used_timestamp:>='${ninetyDaysAgo}'`)}`);
         modules.push('Discover');
-      } catch { /* Module not available */ }
-
-      try {
-        await this.request('/sensor-usage/combined/weekly/v1');
-        modules.push('Sensor Usage');
       } catch { /* Module not available */ }
 
       try {
