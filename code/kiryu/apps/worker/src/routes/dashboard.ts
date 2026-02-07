@@ -319,16 +319,20 @@ dashboardRoutes.get('/tickets/metrics', zValidator('query', dateRangeSchema), as
   const { period } = c.req.valid('query');
 
   try {
+    const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
     const metrics = await c.env.DB.prepare(`
-      SELECT 
+      SELECT
         COUNT(*) as total_tickets,
         COUNT(CASE WHEN status = 'open' THEN 1 END) as open_tickets,
         COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_tickets,
         AVG(resolution_time_hours) as avg_resolution_hours,
         COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority
       FROM tickets
-      WHERE created_at >= datetime('now', '-' || ? || ' days')
-    `).bind(period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90).first();
+      WHERE created_at >= ?
+    `).bind(startDate.toISOString()).first();
 
     return c.json({
       period,

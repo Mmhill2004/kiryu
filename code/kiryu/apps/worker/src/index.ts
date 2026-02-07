@@ -90,9 +90,12 @@ export default {
     // Generate monthly report on the 1st of each month (for previous month)
     const now = new Date(event.scheduledTime);
     if (now.getUTCDate() === 1) {
-      // getUTCMonth() is 0-indexed: Jan=0, Feb=1, etc.
-      // On Jan 1st, generate December report; on Feb 1st, generate January report
-      const prevMonth = now.getUTCMonth() === 0 ? 12 : now.getUTCMonth(); // 1-indexed
+      // getUTCMonth() returns 0-11 (Jan=0, Feb=1, …, Dec=11).
+      // We need the previous month in 1-indexed form (Jan=1 … Dec=12):
+      //   Jan 1st → getUTCMonth()=0 → prevMonth=12 (December)
+      //   Feb 1st → getUTCMonth()=1 → prevMonth=1  (January)
+      //   Mar 1st → getUTCMonth()=2 → prevMonth=2  (February)
+      const prevMonth = now.getUTCMonth() === 0 ? 12 : now.getUTCMonth();
       const prevYear = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
       const flagKey = `report:generated:${prevYear}-${String(prevMonth).padStart(2, '0')}`;
       try {

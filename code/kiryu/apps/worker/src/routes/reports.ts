@@ -24,8 +24,11 @@ reportRoutes.get('/latest', async (c) => {
     return c.text('No reports available yet. Generate one via POST /api/reports/generate', 404);
   }
 
-  // Reports are sorted by key (YYYY-MM), get the last one
-  const latest = reports.sort((a, b) => b.key.localeCompare(a.key))[0]!;
+  // Reports are sorted by key (YYYY-MM), get the most recent
+  const latest = reports.sort((a, b) => b.key.localeCompare(a.key))[0];
+  if (!latest) {
+    return c.text('No reports available', 404);
+  }
   const html = await reportService.getReport(latest.key);
 
   if (!html) {

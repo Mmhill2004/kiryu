@@ -45,22 +45,18 @@ healthRoutes.get('/detailed', async (c) => {
     };
   }
 
-  // Check R2
+  // Check R2 — .head() returns null for non-existent objects (no throw),
+  // so reaching the next line confirms R2 is reachable.
   const r2Start = Date.now();
   try {
     await c.env.REPORTS_BUCKET.head('health-check');
     checks['storage'] = { status: 'healthy', latency: Date.now() - r2Start };
   } catch (error) {
-    // head() returns null for non-existent objects, only actual errors should fail
-    if (error instanceof Error && !error.message.includes('not found')) {
-      checks['storage'] = { 
-        status: 'unhealthy', 
-        latency: Date.now() - r2Start,
-        error: error.message
-      };
-    } else {
-      checks['storage'] = { status: 'healthy', latency: Date.now() - r2Start };
-    }
+    checks['storage'] = {
+      status: 'unhealthy',
+      latency: Date.now() - r2Start,
+      error: error instanceof Error ? error.message : 'Connection failed',
+    };
   }
 
   const allHealthy = Object.values(checks).every(c => c.status === 'healthy');

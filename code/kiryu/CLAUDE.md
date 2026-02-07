@@ -111,179 +111,40 @@ kiryu/
 
 ## Key Files
 
-### CrowdStrike Client (`integrations/crowdstrike/client.ts`)
-Full implementation with 12 modules:
-- OAuth2 token caching (KV-backed, 29 min TTL)
-- `getAlertSummary()` - Alerts by severity, status, MITRE ATT&CK tactics
-- `getAlertAggregates()` - Fast server-side alert counts via aggregates API
-- `getHostSummary()` - Endpoints by platform, containment status
-- `getIncidentSummary()` - Open/closed, lateral movement, MTTR (deprecated March 2026)
-- `getCrowdScore()` - CrowdScore threat level (0-100) with trend sparkline
-- `getVulnerabilitySummary()` - Spotlight: severity, exploit status, ExPRT ratings, top CVEs
-- `getZTASummary()` - Zero Trust Assessment scores
-- `getNGSIEMSummary()` - LogScale repositories, saved searches, data ingest
-- `getOverWatchSummary()` - Threat hunting detections, escalations, coverage
-- `getIdentityDetectionSummary()` - Identity Protection via alerts API (`product:'idp'` filter): detections by severity/type, targeted accounts
-- `getDiscoverSummary()` - Asset inventory: managed/unmanaged assets, sensor coverage % (uses timestamp-based FQL filters)
-- `getSensorUsage()` - Sensor count derived from hosts API (dedicated endpoint not available)
-- `getIntelSummary()` - Threat actors, IOC count, recent intel reports
-- `runDiagnostic()` - Tests all 15 API scopes, reports availability matrix
-- `getFullSummary()` - All 12 modules in parallel via `Promise.allSettled`
+### Integration Clients (`integrations/*/client.ts`)
+All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`.
 
-### Microsoft Client (`integrations/microsoft/client.ts`)
-Full implementation with 8 modules across 3 API surfaces, returning pre-computed analytics (matching CrowdStrike pattern):
-- OAuth2 client credentials flow with KV-backed per-scope token caching + in-flight dedup (Graph, Defender, Management)
-- `getAlertAnalytics()` - Entra / Graph Security alerts with severity/status/category breakdowns (alerts_v2 API)
-- `getSecureScore()` - Microsoft Secure Score (current/max/percentage + industry comparison)
-- `getDefenderAnalytics()` - Defender for Endpoint alerts with severity/detection source breakdowns (Security Center API)
-- `getAssessmentAnalytics()` - Cloud Defender assessments with pass rate and severity breakdown (Azure Management API)
-- `getDeviceCompliance()` - Intune device compliance (compliant/nonCompliant/unknown + compliance rate)
-- `getIdentityRisk()` - Entra ID risky users by risk level and state (Graph API)
-- `getIncidentAnalytics()` - Microsoft security incidents by severity/status/determination (Graph API, $top=50 limit)
-- `getMachineAnalytics()` - Defender machines by risk score, exposure level, health status, and OS (Security Center API)
-- `getFullSummary()` - All 8 modules in parallel with error isolation via `Promise.allSettled`
-- Helper utilities: `countBy<T>()` for grouping, `sevBucket()` for severity normalization
-- Pre-computed analytics types: `AlertAnalytics`, `DefenderAnalytics`, `IdentityRiskSummary`, `IncidentAnalytics`, `MachineAnalytics`, `AssessmentAnalytics`
-
-### Salesforce Client (`integrations/salesforce/client.ts`)
-Full implementation with:
-- OAuth2 Client Credentials flow (KV-backed, 118 min TTL)
-- `getDashboardMetrics()` - All KPIs in one call
-- MTTR calculation (overall and by priority)
-- SLA compliance tracking
-- Backlog aging buckets (<24h, 24-48h, 48-72h, >72h)
-- Agent workload distribution
-- Week-over-week volume comparison
+- **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
+- **Microsoft** — 8 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
+- **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 
 ### Services
+- **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
+- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV. 90-day retention with batched deletes.
+- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline).
+- **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine.
 
-- **CacheService** (`services/cache.ts`) - KV wrapper with well-known keys (`cs:summary:{period}`, `sf:metrics:{period}`, `ms:summary:{period}`) and TTL management
-- **TrendService** (`services/trends.ts`) - Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline)
-- **ReportService** (`services/report.ts`) - Generates HTML executive reports from D1 data, stores in R2, with rules-based recommendation engine
-- **SyncService** (`services/sync.ts`) - Cron-triggered sync storing daily snapshots to D1, invalidating KV cache, enforcing 90-day data retention
-
-### Dashboard (`views/Dashboard.tsx`)
-Displays:
-- Security Score (calculated from CS + MS alert severity)
-- Platform source labels (CS/SF/MS) on all MetricCards
-- **CrowdStrike**: Endpoint Overview, Active Alerts by severity, Alert Status, MITRE Tactics/Techniques, Endpoints by Platform, Host Containment, Extended Intelligence KPIs (CrowdScore, IDP Detections, Unmanaged Assets, Sensor Coverage, Threat Indicators), Identity Protection detail, Asset Discovery detail, Threat Intelligence detail, Recent Alerts table
-- **Salesforce**: Service Desk Metrics (open tickets, MTTR, SLA, escalation rate), Tickets by Priority, Backlog Aging, Agent Workload
-- **Microsoft**: 6 KPI cards (Secure Score, Active Alerts, Risky Users, Open Incidents, Managed Endpoints, Cloud Pass Rate), Entra Alert Breakdown, Defender for Endpoint detail, Identity Risk, Security Incidents, Defender Machines, Cloud Security & Compliance, Recent MS Alerts table, Recent MS Incidents table
-- Recent CrowdStrike alerts and Salesforce tickets tables
-- Platform status, Cache indicator, Report link
-
-### Report Template (`views/ReportTemplate.tsx`)
-Self-contained HTML report with inline CSS:
-- Executive Summary, Security Score ring, Threat Landscape
-- Incident Response, Endpoint Posture, OverWatch Hunting
-- NGSIEM Activity, Service Desk Performance
-- Recommendations (rules-based), Platform Health
-- MITRE tactic plain-English descriptions
+### Views
+- **Dashboard.tsx** — Main dashboard. Renders CS/SF/MS sections with MetricCards (source labels, trend indicators). Security Score calculated from CS + MS alert severity weights.
+- **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
+- **Layout.tsx** — Base HTML shell with all CSS.
 
 ## API Routes
 
-### Public
-- `GET /health` - Health check
+Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `routes/health.ts`, `routes/sync.ts`, `routes/integrations/*.ts`
 
-### Dashboard (Zero Trust protected)
-- `GET /` - Dashboard UI (KV-cached, `?refresh=true` to bust cache)
-- `GET /api/dashboard/summary` - Security metrics summary
-- `GET /api/dashboard/platforms/status` - Platform health
-- `GET /api/dashboard/threats/timeline` - Threat timeline
-- `GET /api/dashboard/incidents/recent` - Recent incidents
-- `GET /api/dashboard/tickets/metrics` - Service desk KPIs
-- `GET /api/dashboard/trends` - Historical trends from D1 (`?metric=crowdstrike|salesforce|all&period=7d`)
-- `GET /api/dashboard/executive-summary` - Plain-language summary for AI consumption
-
-### CrowdStrike
-- `GET /api/integrations/crowdstrike/test` - Test connection + list available modules
-- `GET /api/integrations/crowdstrike/diagnostic` - Test all API scopes, report availability matrix
-- `GET /api/integrations/crowdstrike/summary` - Full summary (all 12 modules)
-- `GET /api/integrations/crowdstrike/crowdscore` - CrowdScore threat level (0-100) with trend
-- `GET /api/integrations/crowdstrike/alerts` - Alert summary with MITRE breakdown
-- `GET /api/integrations/crowdstrike/alerts/list` - Raw alerts list
-- `GET /api/integrations/crowdstrike/alerts/:id` - Single alert by composite ID
-- `GET /api/integrations/crowdstrike/hosts` - Host summary
-- `GET /api/integrations/crowdstrike/hosts/list` - Raw hosts list
-- `GET /api/integrations/crowdstrike/incidents` - Incident summary with MTTR
-- `GET /api/integrations/crowdstrike/incidents/list` - Raw incidents list
-- `GET /api/integrations/crowdstrike/vulnerabilities` - Spotlight vulnerability summary (aggregates)
-- `GET /api/integrations/crowdstrike/vulnerabilities/list` - Raw vulnerability list
-- `GET /api/integrations/crowdstrike/identity` - Identity Protection detection summary
-- `GET /api/integrations/crowdstrike/identity/detections` - Raw IDP detections
-- `GET /api/integrations/crowdstrike/discover` - Asset inventory summary
-- `GET /api/integrations/crowdstrike/sensors` - Sensor usage trends
-- `GET /api/integrations/crowdstrike/intel` - Threat intelligence summary
-- `GET /api/integrations/crowdstrike/intel/actors` - Threat actors list
-- `GET /api/integrations/crowdstrike/intel/reports` - Intel reports list
-- `GET /api/integrations/crowdstrike/ngsiem` - NGSIEM/LogScale summary
-- `GET /api/integrations/crowdstrike/overwatch` - OverWatch threat hunting summary
-- `GET /api/integrations/crowdstrike/zta` - Zero Trust Assessment summary
-- `GET /api/integrations/crowdstrike/zta/list` - Raw ZTA scores
-
-### Microsoft
-- `GET /api/integrations/microsoft/test` - Test connection
-- `GET /api/integrations/microsoft/summary` - Full summary (all 8 modules, pre-computed analytics)
-- `GET /api/integrations/microsoft/alerts` - Entra security alert analytics
-- `GET /api/integrations/microsoft/defender/alerts` - Defender for Endpoint analytics
-- `GET /api/integrations/microsoft/secure-score` - Microsoft Secure Score
-- `GET /api/integrations/microsoft/recommendations` - Cloud Defender assessment analytics
-- `GET /api/integrations/microsoft/compliance` - Device compliance
-
-### Salesforce
-- `GET /api/integrations/salesforce/test` - Test connection
-- `GET /api/integrations/salesforce/metrics` - All KPIs
-- `GET /api/integrations/salesforce/tickets` - Recent tickets
-- `GET /api/integrations/salesforce/open` - Open tickets with aging
-- `GET /api/integrations/salesforce/mttr` - MTTR breakdown
-- `GET /api/integrations/salesforce/workload` - Agent workload
-
-### Reports
-- `GET /api/reports` - List available reports
-- `GET /api/reports/latest` - Serve latest report HTML
-- `GET /api/reports/:yearMonth` - Serve specific report (e.g., `/api/reports/2026-01`)
-- `POST /api/reports/generate` - Generate report (`{ year, month }`)
-
-### Sync (API key required)
-- `POST /api/v1/sync/all` - Sync all platforms
-- `POST /api/v1/sync/:platform` - Sync specific platform
-- `GET /api/v1/sync/status` - Platform sync status
-- `GET /api/v1/sync/history` - Sync log history
+- `GET /` — Dashboard UI (KV-cached, `?period=7d`, `?refresh=true`)
+- `GET /health` — Health check (public, not behind Zero Trust)
+- `GET /api/dashboard/{summary,platforms/status,trends,tickets/metrics,executive-summary}` — Dashboard data APIs
+- `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
+- `GET /api/integrations/microsoft/{summary,alerts,defender/alerts,secure-score,recommendations,compliance}` — Microsoft (identity/incidents/machines only via `/summary`)
+- `GET /api/integrations/salesforce/{metrics,tickets,open,mttr,workload}` — Salesforce
+- `GET /api/reports`, `GET /api/reports/latest`, `GET /api/reports/:yearMonth`, `POST /api/reports/generate` — Reports
+- `POST /api/v1/sync/{all,:platform}`, `GET /api/v1/sync/{status,history}` — Sync (API key required)
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 28 tools:
-
-| Tool | Description |
-|------|-------------|
-| `get_security_summary` | High-level security posture with scores |
-| `search_incidents` | Search incidents with severity/source filters |
-| `get_threat_trends` | Threat timeline analysis |
-| `get_platform_status` | Health/sync status of all platforms |
-| `get_ticket_metrics` | Salesforce service desk KPIs |
-| `trigger_sync` | Manual data sync (one or all platforms) |
-| `get_crowdstrike_detections` | Endpoint alert details (alerts/list) |
-| `get_email_threats` | Abnormal email threats |
-| `get_microsoft_secure_score` | Microsoft 365/Azure secure score |
-| `get_microsoft_summary` | Full Microsoft security summary (all 8 modules, pre-computed analytics) |
-| `get_microsoft_alerts` | Entra / Graph Security alerts |
-| `get_microsoft_defender_alerts` | Defender for Endpoint alerts |
-| `get_microsoft_compliance` | Intune device compliance status |
-| `get_microsoft_recommendations` | Cloud Defender security assessments |
-| `get_ngsiem_summary` | CrowdStrike LogScale metrics |
-| `get_overwatch_summary` | OverWatch threat hunting data |
-| `get_historical_trends` | D1 trend data with period comparisons |
-| `generate_security_report` | Trigger monthly R2 report generation |
-| `list_reports` | List available R2 reports |
-| `get_executive_summary` | Plain-language security narrative |
-| `investigate_alert` | Deep dive into a specific CrowdStrike alert |
-| `get_crowdscore` | CrowdScore threat level (0-100) with trend |
-| `get_vulnerability_summary` | Spotlight vulnerability counts, exploit status, top CVEs |
-| `get_identity_detections` | Identity Protection detections by severity/type |
-| `get_discover_summary` | Asset discovery: managed/unmanaged, sensor coverage % |
-| `get_sensor_usage` | Weekly sensor deployment trends |
-| `get_intel_summary` | Threat actors, IOC count, recent intel reports |
-| `get_crowdstrike_diagnostic` | Test all CrowdStrike API scopes, report availability |
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 28 tools covering all platforms. See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -350,6 +211,7 @@ Key type patterns:
 - `ContentfulStatusCode` (from `hono/utils/http-status`) for `ApiError.statusCode` — Hono's `c.json()` rejects 1xx codes
 - `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
 - Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
+- Stubbed integration credentials (`ABNORMAL_API_TOKEN`, `ZSCALER_API_KEY`, `ZSCALER_API_SECRET`) are typed as required `string` in `Env` but are never set — clients guard with `isConfigured()` at runtime
 
 ## Performance & Stability
 
@@ -372,10 +234,13 @@ Sync service uses `DB.batch()` for all bulk inserts instead of sequential statem
 
 ### KV Cache-First Loading
 ```typescript
-// Dashboard loads from KV cache, falls back to live API
-const cached = await cacheService.get<DashboardData>(CACHE_KEYS.CS_SUMMARY(period));
-if (cached && !refresh) return c.html(<Dashboard data={{ ...cached, dataSource: 'cache' }} />);
+// ui.tsx: try cache first, fall back to live API, then cache result
+const csCacheKey = `${CACHE_KEYS.CROWDSTRIKE_SUMMARY}:${period}`;  // e.g. "cs:summary:7d"
+const cached = await cache.get<CSSummary>(csCacheKey);
+if (cached && !forceRefresh) { crowdstrike = cached.data; return; }
 // Otherwise fetch live, then cache for 5 min
+crowdstrike = await csClient.getFullSummary(daysBack, 30);
+await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
 ```
 
 ### Trend Indicators
