@@ -13,16 +13,19 @@ local_protocol = "http"
 binding = "DB"
 database_name = "security-dashboard-db"
 database_id = "8237357b-18bc-40b3-87fc-83c0b4b58cfe"
+preview_database_id = "e5738092-acf2-48ae-b850-57206de25808"
 
 # R2 Bucket binding for storing reports
 [[r2_buckets]]
 binding = "REPORTS_BUCKET"
 bucket_name = "security-reports"
+preview_bucket_name = "security-reports-preview"
 
 # KV Namespace for caching
 [[kv_namespaces]]
 binding = "CACHE"
 id = "445b6afd3f1044bb9b84c22e32db3f5c"
+preview_id = "3905a62ed3164b31a9764138457a6163"
 
 # Scheduled triggers for data sync
 [triggers]
