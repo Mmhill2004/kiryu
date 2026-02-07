@@ -250,7 +250,7 @@ const TOOLS = [
       properties: {
         metric: {
           type: "string",
-          enum: ["crowdstrike", "salesforce", "all"],
+          enum: ["crowdstrike", "salesforce", "microsoft", "all"],
           description: "Which platform's trends to fetch",
           default: "all",
         },
@@ -321,6 +321,69 @@ const TOOLS = [
       required: ["alert_id"],
     },
   },
+  {
+    name: "get_crowdscore",
+    description:
+      "Get the CrowdStrike CrowdScore — the single most important threat-level KPI (0-100). Includes current score, adjusted score, threat level (low/medium/high/critical), and recent trend data for sparkline visualization.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_vulnerability_summary",
+    description:
+      "Get CrowdStrike Spotlight vulnerability summary. Returns total open vulnerabilities by severity (critical/high/medium/low), exploit availability, ExPRT AI-prioritized ratings, top 10 CVEs by affected host count, and affected host totals.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_identity_detections",
+    description:
+      "Get CrowdStrike Identity Protection detections via the GraphQL API. Returns identity-based attack detections broken down by severity and type (lateral movement, credential theft, etc.), with targeted account and source endpoint counts.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_discover_summary",
+    description:
+      "Get CrowdStrike Discover asset inventory summary. Returns managed vs unmanaged asset counts, total applications discovered, and sensor coverage percentage — key for identifying coverage gaps.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_sensor_usage",
+    description:
+      "Get CrowdStrike sensor deployment and usage trends. Returns current week sensor count, total sensors, and up to 12 weeks of historical data for trend analysis.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_intel_summary",
+    description:
+      "Get CrowdStrike Falcon Intelligence summary. Returns recent threat actors with target industries, total indicator of compromise (IOC) count, and recent intelligence reports — provides adversary context alongside detections.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_crowdstrike_diagnostic",
+    description:
+      "Test all CrowdStrike API scopes and report which modules are accessible. Returns a list of available and unavailable modules with error details. Use this to troubleshoot permissions or identify which CrowdStrike features are licensed.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
 ];
 
 // Tool handlers
@@ -357,13 +420,13 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "trigger_sync": {
       const platform = (args.platform as string) || "all";
-      const endpoint = platform === "all" ? "/api/sync/all" : `/api/sync/${platform}`;
+      const endpoint = platform === "all" ? "/api/v1/sync/all" : `/api/v1/sync/${platform}`;
       return apiRequest(endpoint, { method: "POST" });
     }
 
     case "get_crowdstrike_detections": {
       const limit = (args.limit as number) || 50;
-      return apiRequest(`/api/integrations/crowdstrike/detections?limit=${limit}`);
+      return apiRequest(`/api/integrations/crowdstrike/alerts/list?limit=${limit}`);
     }
 
     case "get_email_threats": {
@@ -431,6 +494,34 @@ async function handleTool(name: string, args: Record<string, unknown>) {
       const alertId = args.alert_id as string;
       if (!alertId) throw new Error("alert_id is required");
       return apiRequest(`/api/integrations/crowdstrike/alerts/${encodeURIComponent(alertId)}`);
+    }
+
+    case "get_crowdscore": {
+      return apiRequest("/api/integrations/crowdstrike/crowdscore");
+    }
+
+    case "get_vulnerability_summary": {
+      return apiRequest("/api/integrations/crowdstrike/vulnerabilities");
+    }
+
+    case "get_identity_detections": {
+      return apiRequest("/api/integrations/crowdstrike/identity");
+    }
+
+    case "get_discover_summary": {
+      return apiRequest("/api/integrations/crowdstrike/discover");
+    }
+
+    case "get_sensor_usage": {
+      return apiRequest("/api/integrations/crowdstrike/sensors");
+    }
+
+    case "get_intel_summary": {
+      return apiRequest("/api/integrations/crowdstrike/intel");
+    }
+
+    case "get_crowdstrike_diagnostic": {
+      return apiRequest("/api/integrations/crowdstrike/diagnostic");
     }
 
     default:

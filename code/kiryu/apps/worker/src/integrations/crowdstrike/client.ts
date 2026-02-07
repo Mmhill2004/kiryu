@@ -335,6 +335,100 @@ export interface ZTASummary {
 }
 
 // ============================================
+// CrowdScore Types
+// ============================================
+export interface CrowdScore {
+  id: string;
+  timestamp: string;
+  score: number;
+  adjusted_score: number;
+}
+
+export interface CrowdScoreSummary {
+  current: number;
+  adjusted: number;
+  level: 'low' | 'medium' | 'high' | 'critical';
+  trend: CrowdScore[];
+}
+
+// ============================================
+// Identity Protection Types (GraphQL)
+// ============================================
+export interface IDPDetection {
+  id: string;
+  timestamp: string;
+  severity: string;
+  type: string;
+  description: string;
+  sourceAccount: { displayName: string; domain: string } | null;
+  targetAccount: { displayName: string; domain: string } | null;
+  sourceEndpoint: { hostname: string; ip: string } | null;
+}
+
+export interface IDPSummary {
+  total: number;
+  bySeverity: Record<string, number>;
+  byType: Record<string, number>;
+  targetedAccounts: number;
+  sourceEndpoints: number;
+  recentDetections: IDPDetection[];
+}
+
+// ============================================
+// Discover / Asset Inventory Types
+// ============================================
+export interface DiscoverSummary {
+  totalApplications: number;
+  unmanagedAssets: number;
+  managedAssets: number;
+  sensorCoverage: number; // percentage
+}
+
+// ============================================
+// Sensor Usage Types
+// ============================================
+export interface SensorUsageSummary {
+  totalSensors: number;
+  currentWeek: Record<string, unknown> | null;
+  trend: Array<Record<string, unknown>>;
+}
+
+// ============================================
+// Threat Intelligence Types
+// ============================================
+export interface IntelActor {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  target_industries: string[];
+  last_activity_date: string;
+}
+
+export interface IntelReport {
+  id: string;
+  name: string;
+  created_date: string;
+  target_industries: string[];
+  motivations: string[];
+}
+
+export interface IntelSummary {
+  recentActors: IntelActor[];
+  indicatorCount: number;
+  recentReports: IntelReport[];
+}
+
+// ============================================
+// Diagnostic Types
+// ============================================
+export interface DiagnosticResult {
+  module: string;
+  available: boolean;
+  error?: string;
+}
+
+// ============================================
 // CrowdStrike Client
 // ============================================
 export class CrowdStrikeClient {
@@ -1339,12 +1433,355 @@ export class CrowdStrikeClient {
   }
 
   // ============================================
+  // CROWDSCORE API
+  // ============================================
+
+  /**
+   * Get CrowdScore — the single most important threat-level KPI (0-100)
+   */
+  async getCrowdScore(): Promise<CrowdScoreSummary> {
+    const response = await this.request<{ resources: CrowdScore[] }>(
+      '/incidents/combined/crowdscores/v1?sort=timestamp.desc&limit=12'
+    );
+
+    const scores = response.resources || [];
+    if (scores.length === 0) {
+      return { current: 0, adjusted: 0, level: 'low', trend: [] };
+    }
+
+    const latest = scores[0];
+    const current = latest.score || 0;
+    const level = current >= 80 ? 'critical' : current >= 60 ? 'high' : current >= 40 ? 'medium' : 'low';
+
+    return {
+      current,
+      adjusted: latest.adjusted_score || current,
+      level,
+      trend: scores,
+    };
+  }
+
+  // ============================================
+  // ALERT AGGREGATES API
+  // ============================================
+
+  /**
+   * Get alert counts via aggregates API — faster and more accurate than fetching all alerts
+   */
+  async getAlertAggregates(daysBack = 7): Promise<{
+    bySeverity: Record<string, number>;
+    byStatus: Record<string, number>;
+    byProduct: Record<string, number>;
+    byTactic: Record<string, number>;
+    total: number;
+  }> {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+    const filter = `created_timestamp:>='${startDate.toISOString()}'`;
+
+    const response = await this.request<{
+      resources: Array<{ name: string; buckets: Array<{ label: string; count: number }> }>;
+    }>(
+      '/alerts/aggregates/alerts/v2',
+      {
+        method: 'POST',
+        body: JSON.stringify([
+          { name: 'severity', type: 'terms', field: 'severity_name', filter },
+          { name: 'status', type: 'terms', field: 'status', filter },
+          { name: 'product', type: 'terms', field: 'product', filter },
+          { name: 'tactic', type: 'terms', field: 'tactic', filter, size: 20 },
+        ]),
+      }
+    );
+
+    const bySeverity: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const byProduct: Record<string, number> = {};
+    const byTactic: Record<string, number> = {};
+    let total = 0;
+
+    for (const agg of response.resources || []) {
+      for (const bucket of agg.buckets || []) {
+        const label = bucket.label || 'unknown';
+        const count = bucket.count || 0;
+
+        if (agg.name === 'severity') {
+          bySeverity[label.toLowerCase()] = count;
+          total += count;
+        } else if (agg.name === 'status') {
+          byStatus[label.toLowerCase()] = count;
+        } else if (agg.name === 'product') {
+          byProduct[label] = count;
+        } else if (agg.name === 'tactic') {
+          byTactic[label] = count;
+        }
+      }
+    }
+
+    return { bySeverity, byStatus, byProduct, byTactic, total };
+  }
+
+  // ============================================
+  // IDENTITY PROTECTION API (GraphQL)
+  // ============================================
+
+  /**
+   * Execute an Identity Protection GraphQL query
+   */
+  private async idpGraphQL<T>(query: string): Promise<T> {
+    const response = await this.request<{ data: T }>(
+      '/identity-protection/combined/graphql/v1',
+      {
+        method: 'POST',
+        body: JSON.stringify({ query }),
+      }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get Identity Protection detections
+   */
+  async getIdentityDetections(limit = 50): Promise<IDPDetection[]> {
+    const data = await this.idpGraphQL<{
+      detections: {
+        nodes: Array<{
+          id: string;
+          timestamp: string;
+          severity: string;
+          type: string;
+          description: string;
+          sourceAccount: { displayName: string; domain: string } | null;
+          targetAccount: { displayName: string; domain: string } | null;
+          sourceEndpoint: { hostname: string; ip: string } | null;
+        }>;
+        totalCount: number;
+      };
+    }>(`{
+      detections(first: ${limit}, sortBy: TIMESTAMP, sortOrder: DESC) {
+        nodes {
+          id
+          timestamp
+          severity
+          type
+          description
+          sourceAccount { displayName domain }
+          targetAccount { displayName domain }
+          sourceEndpoint { hostname ip }
+        }
+        totalCount
+      }
+    }`);
+
+    return data.detections?.nodes || [];
+  }
+
+  /**
+   * Get Identity Protection detection summary
+   */
+  async getIdentityDetectionSummary(): Promise<IDPSummary> {
+    const detections = await this.getIdentityDetections(50);
+
+    const bySeverity: Record<string, number> = {};
+    const byType: Record<string, number> = {};
+    const targetAccounts = new Set<string>();
+    const sourceEndpoints = new Set<string>();
+
+    for (const d of detections) {
+      const sev = d.severity?.toLowerCase() || 'unknown';
+      bySeverity[sev] = (bySeverity[sev] || 0) + 1;
+
+      const type = d.type || 'unknown';
+      byType[type] = (byType[type] || 0) + 1;
+
+      if (d.targetAccount?.displayName) {
+        targetAccounts.add(`${d.targetAccount.domain}\\${d.targetAccount.displayName}`);
+      }
+      if (d.sourceEndpoint?.hostname) {
+        sourceEndpoints.add(d.sourceEndpoint.hostname);
+      }
+    }
+
+    return {
+      total: detections.length,
+      bySeverity,
+      byType,
+      targetedAccounts: targetAccounts.size,
+      sourceEndpoints: sourceEndpoints.size,
+      recentDetections: detections.slice(0, 10),
+    };
+  }
+
+  // ============================================
+  // DISCOVER / ASSET INVENTORY API
+  // ============================================
+
+  /**
+   * Get Discover asset summary — managed vs unmanaged, sensor coverage
+   */
+  async getDiscoverSummary(): Promise<DiscoverSummary> {
+    // Discover API requires a filter — use minimum filter
+    const filter = encodeURIComponent("id:>'0'");
+
+    const [appsResponse, unmanagedResponse, managedCountResponse] = await Promise.all([
+      this.request<{ meta: { pagination: { total: number } } }>(
+        `/discover/combined/applications/v1?limit=1&filter=${filter}`
+      ),
+      this.request<{ meta: { pagination: { total: number } } }>(
+        `/discover/combined/hosts/v1?limit=1&filter=${filter}`
+      ),
+      this.request<{ meta: { pagination: { total: number } } }>(
+        '/devices/queries/devices/v1?limit=1'
+      ),
+    ]);
+
+    const totalApplications = appsResponse.meta?.pagination?.total || 0;
+    const unmanagedAssets = unmanagedResponse.meta?.pagination?.total || 0;
+    const managedAssets = managedCountResponse.meta?.pagination?.total || 0;
+    const totalAssets = managedAssets + unmanagedAssets;
+    const sensorCoverage = totalAssets > 0 ? Math.round((managedAssets / totalAssets) * 10000) / 100 : 0;
+
+    return { totalApplications, unmanagedAssets, managedAssets, sensorCoverage };
+  }
+
+  // ============================================
+  // SENSOR USAGE API
+  // ============================================
+
+  /**
+   * Get weekly sensor usage trends
+   */
+  async getSensorUsage(): Promise<SensorUsageSummary> {
+    const response = await this.request<{ resources: Array<Record<string, unknown>> }>(
+      '/sensor-usage/combined/weekly/v1'
+    );
+
+    const weeks = response.resources || [];
+    return {
+      totalSensors: (weeks[0] as any)?.total_sensor_count || 0,
+      currentWeek: weeks[0] || null,
+      trend: weeks.slice(0, 12),
+    };
+  }
+
+  // ============================================
+  // THREAT INTELLIGENCE API
+  // ============================================
+
+  /**
+   * Get recent threat actors
+   */
+  async getActors(limit = 5): Promise<IntelActor[]> {
+    const queryResponse = await this.request<{ resources: string[] }>(
+      `/intel/queries/actors/v1?limit=${limit}&sort=last_activity_date|desc`
+    );
+
+    if (!queryResponse.resources?.length) return [];
+
+    const ids = queryResponse.resources.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+    const details = await this.request<{ resources: IntelActor[] }>(
+      `/intel/entities/actors/v1?${ids}&fields=__full__`
+    );
+    return details.resources || [];
+  }
+
+  /**
+   * Get total indicator count
+   */
+  async getIndicatorCount(): Promise<number> {
+    const response = await this.request<{ meta: { pagination: { total: number } } }>(
+      '/intel/queries/indicators/v1?limit=1&filter=deleted:false'
+    );
+    return response.meta?.pagination?.total || 0;
+  }
+
+  /**
+   * Get recent intel reports
+   */
+  async getIntelReports(limit = 5): Promise<IntelReport[]> {
+    const queryResponse = await this.request<{ resources: string[] }>(
+      `/intel/queries/reports/v1?limit=${limit}&sort=created_date|desc`
+    );
+
+    if (!queryResponse.resources?.length) return [];
+
+    const ids = queryResponse.resources.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+    const details = await this.request<{ resources: IntelReport[] }>(
+      `/intel/entities/reports/v1?${ids}&fields=__full__`
+    );
+    return details.resources || [];
+  }
+
+  /**
+   * Get threat intelligence summary
+   */
+  async getIntelSummary(): Promise<IntelSummary> {
+    const [actorsResult, countResult, reportsResult] = await Promise.allSettled([
+      this.getActors(5),
+      this.getIndicatorCount(),
+      this.getIntelReports(5),
+    ]);
+
+    return {
+      recentActors: actorsResult.status === 'fulfilled' ? actorsResult.value : [],
+      indicatorCount: countResult.status === 'fulfilled' ? countResult.value : 0,
+      recentReports: reportsResult.status === 'fulfilled' ? reportsResult.value : [],
+    };
+  }
+
+  // ============================================
+  // DIAGNOSTIC
+  // ============================================
+
+  /**
+   * Test every API scope and report availability
+   */
+  async runDiagnostic(): Promise<DiagnosticResult[]> {
+    const tests: Array<{ module: string; endpoint: string; method?: string; body?: string }> = [
+      { module: 'Alerts', endpoint: '/alerts/queries/alerts/v2?limit=1' },
+      { module: 'Hosts', endpoint: '/devices/queries/devices/v1?limit=1' },
+      { module: 'Incidents', endpoint: '/incidents/queries/incidents/v1?limit=1' },
+      { module: 'Spotlight', endpoint: `/spotlight/queries/vulnerabilities/v1?limit=1&filter=${encodeURIComponent("status:'open'")}` },
+      { module: 'ZTA', endpoint: '/zero-trust-assessment/entities/assessments/v1?ids=test' },
+      { module: 'NGSIEM', endpoint: '/loggingreadonly/combined/repos/v1?limit=1' },
+      { module: 'OverWatch', endpoint: '/overwatch-dashboards/aggregates/detections-global-counts/v1' },
+      { module: 'Identity Protection', endpoint: '/identity-protection/combined/graphql/v1', method: 'POST', body: JSON.stringify({ query: '{ detections(first: 1) { totalCount } }' }) },
+      { module: 'Discover', endpoint: `/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent("id:>'0'")}` },
+      { module: 'Sensor Usage', endpoint: '/sensor-usage/combined/weekly/v1' },
+      { module: 'Intel Actors', endpoint: '/intel/queries/actors/v1?limit=1' },
+      { module: 'Intel Indicators', endpoint: '/intel/queries/indicators/v1?limit=1' },
+      { module: 'Intel Reports', endpoint: '/intel/queries/reports/v1?limit=1' },
+      { module: 'CrowdScore', endpoint: '/incidents/combined/crowdscores/v1?limit=1' },
+      { module: 'Prevention Policies', endpoint: '/policy/combined/prevention/v1?limit=1' },
+    ];
+
+    const results = await Promise.allSettled(
+      tests.map(async (test): Promise<DiagnosticResult> => {
+        try {
+          await this.request(test.endpoint, {
+            method: test.method || 'GET',
+            ...(test.body ? { body: test.body } : {}),
+          });
+          return { module: test.module, available: true };
+        } catch (error) {
+          return {
+            module: test.module,
+            available: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })
+    );
+
+    return results.map(r => r.status === 'fulfilled' ? r.value : { module: 'unknown', available: false, error: 'Promise rejected' });
+  }
+
+  // ============================================
   // COMBINED SUMMARY
   // ============================================
 
   /**
-   * Get full dashboard summary
-   * Note: Spotlight vulnerabilities removed - license not available
+   * Get full dashboard summary — all 12 modules in parallel
    */
   async getFullSummary(alertDays = 7, incidentDays = 30): Promise<{
     alerts: AlertSummary;
@@ -1353,12 +1790,18 @@ export class CrowdStrikeClient {
     zta: ZTASummary;
     ngsiem: NGSIEMSummary;
     overwatch: OverWatchSummary;
+    crowdScore: CrowdScoreSummary | null;
+    vulnerabilities: VulnerabilitySummary | null;
+    identity: IDPSummary | null;
+    discover: DiscoverSummary | null;
+    sensors: SensorUsageSummary | null;
+    intel: IntelSummary | null;
     fetchedAt: string;
     errors?: string[];
   }> {
     const errors: string[] = [];
 
-    // Default values for when individual calls fail
+    // Default values for existing modules (keeps dashboard working on failures)
     const defaultAlerts: AlertSummary = {
       total: 0,
       bySeverity: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
@@ -1417,22 +1860,40 @@ export class CrowdStrikeClient {
       huntingCoverage: { hostsMonitored: 0, threatsIdentified: 0 },
     };
 
-    // Fetch all data with individual error handling
-    const [alertsResult, hostsResult, incidentsResult, ztaResult, ngsiemResult, overwatchResult] = await Promise.allSettled([
+    // Fetch all 12 modules in parallel with individual error handling
+    const [
+      alertsResult, hostsResult, incidentsResult, ztaResult, ngsiemResult, overwatchResult,
+      crowdScoreResult, vulnsResult, identityResult, discoverResult, sensorsResult, intelResult,
+    ] = await Promise.allSettled([
       this.getAlertSummary(alertDays),
       this.getHostSummary(),
       this.getIncidentSummary(incidentDays),
       this.getZTASummary(),
       this.getNGSIEMSummary(),
       this.getOverWatchSummary(),
+      this.getCrowdScore(),
+      this.getVulnerabilitySummary(),
+      this.getIdentityDetectionSummary(),
+      this.getDiscoverSummary(),
+      this.getSensorUsage(),
+      this.getIntelSummary(),
     ]);
 
+    // Existing modules: use defaults on failure
     const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value : (errors.push(`Alerts: ${(alertsResult as PromiseRejectedResult).reason}`), defaultAlerts);
     const hosts = hostsResult.status === 'fulfilled' ? hostsResult.value : (errors.push(`Hosts: ${(hostsResult as PromiseRejectedResult).reason}`), defaultHosts);
     const incidents = incidentsResult.status === 'fulfilled' ? incidentsResult.value : (errors.push(`Incidents: ${(incidentsResult as PromiseRejectedResult).reason}`), defaultIncidents);
     const zta = ztaResult.status === 'fulfilled' ? ztaResult.value : (errors.push(`ZTA: ${(ztaResult as PromiseRejectedResult).reason}`), defaultZTA);
     const ngsiem = ngsiemResult.status === 'fulfilled' ? ngsiemResult.value : (errors.push(`NGSIEM: ${(ngsiemResult as PromiseRejectedResult).reason}`), defaultNGSIEM);
     const overwatch = overwatchResult.status === 'fulfilled' ? overwatchResult.value : (errors.push(`OverWatch: ${(overwatchResult as PromiseRejectedResult).reason}`), defaultOverWatch);
+
+    // New modules: null on failure
+    const crowdScore = crowdScoreResult.status === 'fulfilled' ? crowdScoreResult.value : (errors.push(`CrowdScore: ${(crowdScoreResult as PromiseRejectedResult).reason}`), null);
+    const vulnerabilities = vulnsResult.status === 'fulfilled' ? vulnsResult.value : (errors.push(`Vulnerabilities: ${(vulnsResult as PromiseRejectedResult).reason}`), null);
+    const identity = identityResult.status === 'fulfilled' ? identityResult.value : (errors.push(`Identity Protection: ${(identityResult as PromiseRejectedResult).reason}`), null);
+    const discover = discoverResult.status === 'fulfilled' ? discoverResult.value : (errors.push(`Discover: ${(discoverResult as PromiseRejectedResult).reason}`), null);
+    const sensors = sensorsResult.status === 'fulfilled' ? sensorsResult.value : (errors.push(`Sensor Usage: ${(sensorsResult as PromiseRejectedResult).reason}`), null);
+    const intel = intelResult.status === 'fulfilled' ? intelResult.value : (errors.push(`Intel: ${(intelResult as PromiseRejectedResult).reason}`), null);
 
     if (errors.length > 0) {
       console.error('CrowdStrike API errors:', errors);
@@ -1445,6 +1906,12 @@ export class CrowdStrikeClient {
       zta,
       ngsiem,
       overwatch,
+      crowdScore,
+      vulnerabilities,
+      identity,
+      discover,
+      sensors,
+      intel,
       fetchedAt: new Date().toISOString(),
       errors: errors.length > 0 ? errors : undefined,
     };
@@ -1475,7 +1942,10 @@ export class CrowdStrikeClient {
         modules.push('Incidents');
       } catch { /* Module not available */ }
 
-      // Spotlight removed - license not available
+      try {
+        await this.request(`/spotlight/queries/vulnerabilities/v1?limit=1&filter=${encodeURIComponent("status:'open'")}`);
+        modules.push('Spotlight');
+      } catch { /* Module not available */ }
 
       try {
         await this.request('/zero-trust-assessment/entities/assessments/v1?ids=test');
@@ -1490,6 +1960,34 @@ export class CrowdStrikeClient {
       try {
         await this.request('/overwatch-dashboards/aggregates/detections-global-counts/v1');
         modules.push('OverWatch');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/incidents/combined/crowdscores/v1?limit=1');
+        modules.push('CrowdScore');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/identity-protection/combined/graphql/v1', {
+          method: 'POST',
+          body: JSON.stringify({ query: '{ detections(first: 1) { totalCount } }' }),
+        });
+        modules.push('Identity Protection');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request(`/discover/combined/applications/v1?limit=1&filter=${encodeURIComponent("id:>'0'")}`);
+        modules.push('Discover');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/sensor-usage/combined/weekly/v1');
+        modules.push('Sensor Usage');
+      } catch { /* Module not available */ }
+
+      try {
+        await this.request('/intel/queries/actors/v1?limit=1');
+        modules.push('Intel');
       } catch { /* Module not available */ }
 
       return {

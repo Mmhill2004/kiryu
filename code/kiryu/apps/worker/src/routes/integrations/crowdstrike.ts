@@ -249,6 +249,271 @@ crowdstrikeRoutes.get('/overwatch', async (c) => {
 });
 
 // ============================================
+// DIAGNOSTIC ENDPOINT
+// ============================================
+
+/**
+ * Test all CrowdStrike API scopes and report availability
+ */
+crowdstrikeRoutes.get('/diagnostic', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const results = await client.runDiagnostic();
+    const available = results.filter(r => r.available).map(r => r.module);
+    const unavailable = results.filter(r => !r.available).map(r => ({ module: r.module, error: r.error }));
+    return c.json({ available, unavailable, details: results });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to run diagnostic',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// CROWDSCORE ENDPOINT
+// ============================================
+
+/**
+ * Get CrowdScore threat level
+ */
+crowdstrikeRoutes.get('/crowdscore', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const score = await client.getCrowdScore();
+    return c.json(score);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch CrowdScore',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// VULNERABILITY ENDPOINTS
+// ============================================
+
+/**
+ * Get vulnerability summary with aggregates
+ */
+crowdstrikeRoutes.get('/vulnerabilities', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getVulnerabilitySummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch vulnerabilities',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get raw vulnerability list
+ */
+crowdstrikeRoutes.get('/vulnerabilities/list', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+  const limit = safeInt(c.req.query('limit'), 100, 500);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const vulns = await client.getVulnerabilities(limit);
+    return c.json({ vulnerabilities: vulns, count: vulns.length });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch vulnerabilities',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// IDENTITY PROTECTION ENDPOINTS
+// ============================================
+
+/**
+ * Get Identity Protection detection summary
+ */
+crowdstrikeRoutes.get('/identity', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getIdentityDetectionSummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch identity detections',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get raw Identity Protection detections
+ */
+crowdstrikeRoutes.get('/identity/detections', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+  const limit = safeInt(c.req.query('limit'), 50, 100);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const detections = await client.getIdentityDetections(limit);
+    return c.json({ detections, count: detections.length });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch identity detections',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// DISCOVER / ASSET INVENTORY ENDPOINTS
+// ============================================
+
+/**
+ * Get Discover asset summary
+ */
+crowdstrikeRoutes.get('/discover', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getDiscoverSummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch asset discovery data',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// SENSOR USAGE ENDPOINTS
+// ============================================
+
+/**
+ * Get sensor usage trends
+ */
+crowdstrikeRoutes.get('/sensors', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const usage = await client.getSensorUsage();
+    return c.json(usage);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch sensor usage',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// THREAT INTELLIGENCE ENDPOINTS
+// ============================================
+
+/**
+ * Get intel summary (actors, indicators, reports)
+ */
+crowdstrikeRoutes.get('/intel', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getIntelSummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch threat intelligence',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get threat actors
+ */
+crowdstrikeRoutes.get('/intel/actors', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+  const limit = safeInt(c.req.query('limit'), 20, 50);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const actors = await client.getActors(limit);
+    return c.json({ actors, count: actors.length });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch threat actors',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get intel reports
+ */
+crowdstrikeRoutes.get('/intel/reports', async (c) => {
+  const client = new CrowdStrikeClient(c.env);
+  const limit = safeInt(c.req.query('limit'), 10, 50);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'CrowdStrike not configured' }, 503);
+  }
+
+  try {
+    const reports = await client.getIntelReports(limit);
+    return c.json({ reports, count: reports.length });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch intel reports',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
 // ALERT DETAIL ENDPOINT
 // ============================================
 

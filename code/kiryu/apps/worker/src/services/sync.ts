@@ -105,9 +105,9 @@ export class SyncService {
 
     const client = new CrowdStrikeClient(this.env, this.env.CACHE);
 
-    // Fetch full summary (all 6 modules in parallel)
+    // Fetch full summary (all 12 modules in parallel)
     const fullSummary = await client.getFullSummary(7, 30);
-    const { alerts, hosts, incidents, zta, ngsiem, overwatch } = fullSummary;
+    const { alerts, hosts, incidents, zta, ngsiem, overwatch, crowdScore, vulnerabilities, identity, discover, sensors } = fullSummary;
 
     let recordsSynced = 0;
 
@@ -192,11 +192,19 @@ export class SyncService {
           ngsiem_auth_events, ngsiem_network_events, ngsiem_process_events, ngsiem_dns_events,
           overwatch_total_detections, overwatch_active_escalations, overwatch_resolved_30d,
           overwatch_critical, overwatch_high, overwatch_medium, overwatch_low,
+          crowdscore, crowdscore_adjusted,
+          vulns_total, vulns_critical, vulns_high, vulns_medium, vulns_low, vulns_with_exploits, vulns_unique_cves,
+          idp_detections_total, idp_detections_critical, idp_detections_high, idp_targeted_accounts, idp_source_endpoints,
+          discover_total_apps, discover_unmanaged_assets, discover_sensor_coverage, sensor_total_count,
           security_score, metadata, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, datetime('now')
         )
       `).bind(
         today,
@@ -218,12 +226,24 @@ export class SyncService {
         overwatch.totalDetections, overwatch.activeEscalations, overwatch.resolvedLast30Days,
         overwatch.detectionsBySeverity.critical, overwatch.detectionsBySeverity.high,
         overwatch.detectionsBySeverity.medium, overwatch.detectionsBySeverity.low,
+        crowdScore?.current || null, crowdScore?.adjusted || null,
+        vulnerabilities?.total || 0, vulnerabilities?.bySeverity.critical || 0,
+        vulnerabilities?.bySeverity.high || 0, vulnerabilities?.bySeverity.medium || 0,
+        vulnerabilities?.bySeverity.low || 0, vulnerabilities?.withExploits || 0,
+        vulnerabilities?.topCVEs?.length || 0,
+        identity?.total || 0, identity?.bySeverity?.critical || 0,
+        identity?.bySeverity?.high || 0, identity?.targetedAccounts || 0, identity?.sourceEndpoints || 0,
+        discover?.totalApplications || 0, discover?.unmanagedAssets || 0,
+        discover?.sensorCoverage || 0, sensors?.totalSensors || 0,
         securityScore,
         JSON.stringify({
           byTactic: alerts.byTactic,
           byTechnique: alerts.byTechnique,
           overwatchByTactic: overwatch.detectionsByTactic,
           ngsiemTopEventTypes: ngsiem.topEventTypes,
+          crowdScoreLevel: crowdScore?.level,
+          intelActorCount: fullSummary.intel?.recentActors?.length || 0,
+          intelIndicatorCount: fullSummary.intel?.indicatorCount || 0,
           errors: fullSummary.errors,
         })
       ).run();
