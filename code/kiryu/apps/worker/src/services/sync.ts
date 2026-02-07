@@ -36,10 +36,13 @@ export class SyncService {
 
     // Invalidate dashboard cache after sync so next page load gets fresh data
     try {
-      const cacheKeys = ['cs:summary:24h', 'cs:summary:7d', 'cs:summary:30d', 'cs:summary:90d',
-                         'sf:metrics:24h', 'sf:metrics:7d', 'sf:metrics:30d', 'sf:metrics:90d',
-                         'ms:summary:24h', 'ms:summary:7d', 'ms:summary:30d', 'ms:summary:90d'];
-      await Promise.all(cacheKeys.map(k => this.env.CACHE.delete(k)));
+      const { CacheService } = await import('./cache');
+      const cacheService = new CacheService(this.env.CACHE);
+      await Promise.all([
+        cacheService.invalidatePrefix('cs:summary'),
+        cacheService.invalidatePrefix('sf:metrics'),
+        cacheService.invalidatePrefix('ms:summary'),
+      ]);
     } catch { /* ignore cache errors */ }
 
     // Run data retention cleanup
@@ -111,26 +114,28 @@ export class SyncService {
 
     let recordsSynced = 0;
 
-    // Store recent alerts as security events
-    for (const alert of alerts.recentAlerts) {
+    // Store recent alerts as security events (batched)
+    if (alerts.recentAlerts.length > 0) {
       const severityMap: Record<number, string> = {
         5: 'critical', 4: 'high', 3: 'medium', 2: 'low', 1: 'informational'
       };
-      const severity = alert.severity_name?.toLowerCase() || severityMap[alert.severity] || 'medium';
-
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events
-        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-        VALUES (?, 'crowdstrike', 'alert', ?, ?, ?, 1, ?, ?)
-      `).bind(
-        alert.composite_id,
-        severity,
-        alert.name || alert.tactic || 'CrowdStrike Alert',
-        alert.description || '',
-        JSON.stringify(alert),
-        alert.created_timestamp
-      ).run();
-      recordsSynced++;
+      const alertStmts = alerts.recentAlerts.map(alert => {
+        const severity = alert.severity_name?.toLowerCase() || severityMap[alert.severity] || 'medium';
+        return this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_events
+          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+          VALUES (?, 'crowdstrike', 'alert', ?, ?, ?, 1, ?, ?)
+        `).bind(
+          alert.composite_id,
+          severity,
+          alert.name || alert.tactic || 'CrowdStrike Alert',
+          alert.description || '',
+          JSON.stringify(alert),
+          alert.created_timestamp
+        );
+      });
+      await this.env.DB.batch(alertStmts);
+      recordsSynced += alerts.recentAlerts.length;
     }
 
     // Store daily summary metrics
@@ -270,23 +275,26 @@ export class SyncService {
 
     const client = new AbnormalClient(this.env);
     const threats = await client.getThreats();
-    
+
     let recordsSynced = 0;
 
-    for (const threat of threats) {
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events 
-        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-        VALUES (?, 'abnormal', 'email_threat', ?, ?, ?, 1, ?, ?)
-      `).bind(
-        threat.threatId,
-        threat.severity?.toLowerCase() || 'medium',
-        threat.attackType || 'Email Threat',
-        threat.subject || '',
-        JSON.stringify(threat),
-        threat.receivedTime
-      ).run();
-      recordsSynced++;
+    if (threats.length > 0) {
+      const stmts = threats.map(threat =>
+        this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_events
+          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+          VALUES (?, 'abnormal', 'email_threat', ?, ?, ?, 1, ?, ?)
+        `).bind(
+          threat.threatId,
+          threat.severity?.toLowerCase() || 'medium',
+          threat.attackType || 'Email Threat',
+          threat.subject || '',
+          JSON.stringify(threat),
+          threat.receivedTime
+        )
+      );
+      await this.env.DB.batch(stmts);
+      recordsSynced = threats.length;
     }
 
     await this.updatePlatformStatus('abnormal', 'healthy');
@@ -300,23 +308,26 @@ export class SyncService {
 
     const client = new ZscalerClient(this.env);
     const events = await client.getSecurityEvents();
-    
+
     let recordsSynced = 0;
 
-    for (const event of events) {
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events 
-        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-        VALUES (?, 'zscaler', 'web_threat', ?, ?, ?, 1, ?, ?)
-      `).bind(
-        event.id || crypto.randomUUID(),
-        event.severity?.toLowerCase() || 'medium',
-        event.category || 'Web Threat',
-        event.url || '',
-        JSON.stringify(event),
-        event.datetime || new Date().toISOString()
-      ).run();
-      recordsSynced++;
+    if (events.length > 0) {
+      const stmts = events.map(event =>
+        this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_events
+          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+          VALUES (?, 'zscaler', 'web_threat', ?, ?, ?, 1, ?, ?)
+        `).bind(
+          event.id || crypto.randomUUID(),
+          event.severity?.toLowerCase() || 'medium',
+          event.category || 'Web Threat',
+          event.url || '',
+          JSON.stringify(event),
+          event.datetime || new Date().toISOString()
+        )
+      );
+      await this.env.DB.batch(stmts);
+      recordsSynced = events.length;
     }
 
     await this.updatePlatformStatus('zscaler', 'healthy');
@@ -333,38 +344,40 @@ export class SyncService {
 
     let recordsSynced = 0;
 
-    // Store Graph security alerts
-    for (const alert of summary.alertAnalytics.recentAlerts) {
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events
-        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-        VALUES (?, 'microsoft', 'security_alert', ?, ?, ?, 1, ?, ?)
-      `).bind(
-        alert.id,
-        alert.severity?.toLowerCase() || 'medium',
-        alert.title || 'Security Alert',
-        alert.description || '',
-        JSON.stringify(alert),
-        alert.createdDateTime
-      ).run();
-      recordsSynced++;
-    }
-
-    // Store Defender for Endpoint alerts
-    for (const alert of summary.defenderAnalytics.recentAlerts) {
-      await this.env.DB.prepare(`
-        INSERT OR REPLACE INTO security_events
-        (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-        VALUES (?, 'microsoft', 'defender_alert', ?, ?, ?, 1, ?, ?)
-      `).bind(
-        `defender_${alert.id}`,
-        alert.severity?.toLowerCase() || 'medium',
-        alert.title || 'Defender Alert',
-        `Classification: ${alert.classification || 'unknown'}`,
-        JSON.stringify(alert),
-        alert.createdDateTime
-      ).run();
-      recordsSynced++;
+    // Store Graph security alerts + Defender alerts (batched)
+    const msAlertStmts = [
+      ...summary.alertAnalytics.recentAlerts.map(alert =>
+        this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_events
+          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+          VALUES (?, 'microsoft', 'security_alert', ?, ?, ?, 1, ?, ?)
+        `).bind(
+          alert.id,
+          alert.severity?.toLowerCase() || 'medium',
+          alert.title || 'Security Alert',
+          alert.description || '',
+          JSON.stringify(alert),
+          alert.createdDateTime
+        )
+      ),
+      ...summary.defenderAnalytics.recentAlerts.map(alert =>
+        this.env.DB.prepare(`
+          INSERT OR REPLACE INTO security_events
+          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
+          VALUES (?, 'microsoft', 'defender_alert', ?, ?, ?, 1, ?, ?)
+        `).bind(
+          `defender_${alert.id}`,
+          alert.severity?.toLowerCase() || 'medium',
+          alert.title || 'Defender Alert',
+          `Classification: ${alert.classification || 'unknown'}`,
+          JSON.stringify(alert),
+          alert.createdDateTime
+        )
+      ),
+    ];
+    if (msAlertStmts.length > 0) {
+      await this.env.DB.batch(msAlertStmts);
+      recordsSynced += msAlertStmts.length;
     }
 
     // Store secure score
@@ -425,17 +438,19 @@ export class SyncService {
 
     let recordsSynced = 0;
 
-    for (const ticket of tickets) {
-      const resolutionMinutes = ticket.ClosedDate
-        ? Math.round(
-            (new Date(ticket.ClosedDate).getTime() - new Date(ticket.CreatedDate).getTime()) /
-              (1000 * 60)
-          )
-        : null;
+    // Batch ticket inserts in chunks of 100 (D1 batch limit considerations)
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < tickets.length; i += BATCH_SIZE) {
+      const chunk = tickets.slice(i, i + BATCH_SIZE);
+      const stmts = chunk.map(ticket => {
+        const resolutionMinutes = ticket.ClosedDate
+          ? Math.round(
+              (new Date(ticket.ClosedDate).getTime() - new Date(ticket.CreatedDate).getTime()) /
+                (1000 * 60)
+            )
+          : null;
 
-      // Try to insert into security_tickets (new table), fallback to tickets (old table)
-      try {
-        await this.env.DB.prepare(`
+        return this.env.DB.prepare(`
           INSERT OR REPLACE INTO security_tickets (
             id, case_number, subject, description, status, priority,
             ticket_type, reason, origin, is_escalated, is_closed,
@@ -464,25 +479,38 @@ export class SyncService {
           ticket.CreatedDate,
           ticket.ClosedDate,
           resolutionMinutes
-        ).run();
+        );
+      });
+
+      try {
+        await this.env.DB.batch(stmts);
       } catch {
         // Fallback to old tickets table if security_tickets doesn't exist
-        await this.env.DB.prepare(`
-          INSERT OR REPLACE INTO tickets
-          (id, case_number, subject, status, priority, created_at, closed_at, resolution_time_hours)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(
-          ticket.Id,
-          ticket.CaseNumber,
-          ticket.Subject,
-          ticket.Status,
-          ticket.Priority,
-          ticket.CreatedDate,
-          ticket.ClosedDate,
-          resolutionMinutes ? Math.round(resolutionMinutes / 60) : null
-        ).run();
+        const fallbackStmts = chunk.map(ticket => {
+          const resolutionMinutes = ticket.ClosedDate
+            ? Math.round(
+                (new Date(ticket.ClosedDate).getTime() - new Date(ticket.CreatedDate).getTime()) /
+                  (1000 * 60)
+              )
+            : null;
+          return this.env.DB.prepare(`
+            INSERT OR REPLACE INTO tickets
+            (id, case_number, subject, status, priority, created_at, closed_at, resolution_time_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            ticket.Id,
+            ticket.CaseNumber,
+            ticket.Subject,
+            ticket.Status,
+            ticket.Priority,
+            ticket.CreatedDate,
+            ticket.ClosedDate,
+            resolutionMinutes ? Math.round(resolutionMinutes / 60) : null
+          );
+        });
+        await this.env.DB.batch(fallbackStmts);
       }
-      recordsSynced++;
+      recordsSynced += chunk.length;
     }
 
     // Get metrics for platform status
@@ -546,16 +574,28 @@ export class SyncService {
         continue;
       }
       try {
-        const result = await this.env.DB.prepare(
-          `DELETE FROM ${table.name} WHERE ${table.dateCol} < ?`
-        ).bind(cutoff).run();
+        // Batched deletion to avoid D1 timeout on large tables
+        let totalDeleted = 0;
+        const DELETE_BATCH = 500;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const result = await this.env.DB.prepare(
+            `DELETE FROM ${table.name} WHERE rowid IN (
+              SELECT rowid FROM ${table.name} WHERE ${table.dateCol} < ? LIMIT ?
+            )`
+          ).bind(cutoff, DELETE_BATCH).run();
 
-        if (result.meta.changes && result.meta.changes > 0) {
+          const deleted = result.meta.changes || 0;
+          totalDeleted += deleted;
+          if (deleted < DELETE_BATCH) break;
+        }
+
+        if (totalDeleted > 0) {
           await this.env.DB.prepare(`
             INSERT INTO data_retention_log (run_at, table_name, records_deleted, oldest_date_removed)
             VALUES (?, ?, ?, ?)
-          `).bind(new Date().toISOString(), table.name, result.meta.changes, cutoff).run();
-          console.log(`Retention: deleted ${result.meta.changes} rows from ${table.name}`);
+          `).bind(new Date().toISOString(), table.name, totalDeleted, cutoff).run();
+          console.log(`Retention: deleted ${totalDeleted} rows from ${table.name}`);
         }
       } catch (error) {
         console.error(`Retention cleanup failed for ${table.name}:`, error);

@@ -87,17 +87,19 @@ export default {
       console.error('Scheduled sync failed:', error);
     }
 
-    // Generate monthly report on the 1st of each month
+    // Generate monthly report on the 1st of each month (for previous month)
     const now = new Date(event.scheduledTime);
     if (now.getUTCDate() === 1) {
-      const flagKey = `report:generated:${now.getUTCFullYear()}-${String(now.getUTCMonth()).padStart(2, '0')}`;
+      // getUTCMonth() is 0-indexed: Jan=0, Feb=1, etc.
+      // On Jan 1st, generate December report; on Feb 1st, generate January report
+      const prevMonth = now.getUTCMonth() === 0 ? 12 : now.getUTCMonth(); // 1-indexed
+      const prevYear = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
+      const flagKey = `report:generated:${prevYear}-${String(prevMonth).padStart(2, '0')}`;
       try {
         const alreadyGenerated = await env.CACHE.get(flagKey);
         if (!alreadyGenerated) {
           const { ReportService } = await import('./services/report');
           const reportService = new ReportService(env);
-          const prevMonth = now.getUTCMonth() === 0 ? 12 : now.getUTCMonth();
-          const prevYear = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
           await reportService.generateMonthlyReport(prevYear, prevMonth);
           await env.CACHE.put(flagKey, 'true', { expirationTtl: 86400 * 7 });
           console.log(`Monthly report generated for ${prevYear}-${String(prevMonth).padStart(2, '0')}`);

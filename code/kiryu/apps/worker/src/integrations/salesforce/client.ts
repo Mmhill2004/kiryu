@@ -80,6 +80,7 @@ export class SalesforceClient {
   private instanceUrl: string | null = null;
   private readonly apiVersion = 'v59.0';
   private cache: KVNamespace | null;
+  private pendingAuth: Promise<string> | null = null;
 
   constructor(private env: Env, cache?: KVNamespace) {
     this.cache = cache || null;
@@ -97,14 +98,26 @@ export class SalesforceClient {
   }
 
   /**
-   * Get OAuth access token using Client Credentials flow
+   * Get OAuth access token using Client Credentials flow (with in-flight deduplication)
    */
   private async getAccessToken(): Promise<string> {
-    // Return cached token if valid
+    // Fast path: in-memory token still valid
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken;
     }
 
+    // Deduplicate concurrent auth calls
+    if (this.pendingAuth) return this.pendingAuth;
+
+    this.pendingAuth = this.getAccessTokenInner();
+    try {
+      return await this.pendingAuth;
+    } finally {
+      this.pendingAuth = null;
+    }
+  }
+
+  private async getAccessTokenInner(): Promise<string> {
     // Check KV cache
     if (this.cache) {
       try {
@@ -125,17 +138,32 @@ export class SalesforceClient {
     // Remove trailing slash if present
     const instanceUrl = this.env.SALESFORCE_INSTANCE_URL.replace(/\/$/, '');
 
-    const response = await fetch(`${instanceUrl}/services/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.env.SALESFORCE_CLIENT_ID,
-        client_secret: this.env.SALESFORCE_CLIENT_SECRET,
-      }),
-    });
+    const authController = new AbortController();
+    const authTimeout = setTimeout(() => authController.abort(), 10000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${instanceUrl}/services/oauth2/token`, {
+        method: 'POST',
+        signal: authController.signal,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: this.env.SALESFORCE_CLIENT_ID,
+          client_secret: this.env.SALESFORCE_CLIENT_SECRET,
+        }),
+      });
+    } catch (error) {
+      clearTimeout(authTimeout);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Salesforce authentication timeout (10s)');
+      }
+      throw error;
+    } finally {
+      clearTimeout(authTimeout);
+    }
 
     if (!response.ok) {
       const error = await response.text();
@@ -184,20 +212,33 @@ export class SalesforceClient {
     const token = await this.getAccessToken();
     const url = `${this.getInstanceUrl()}/services/data/${this.apiVersion}/query?q=${encodeURIComponent(soql)}`;
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`SOQL query failed: ${response.status} - ${error}`);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`SOQL query failed: ${response.status} - ${error}`);
+      }
+
+      const data = (await response.json()) as { records: T[]; totalSize: number; done: boolean };
+      return data.records;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`SOQL query timeout (20s)`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = (await response.json()) as { records: T[]; totalSize: number; done: boolean };
-    return data.records;
   }
 
   /**

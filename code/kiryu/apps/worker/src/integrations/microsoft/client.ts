@@ -295,16 +295,31 @@ export class MicrosoftClient {
     // 4. Fetch fresh token
     const tokenUrl = `https://login.microsoftonline.com/${this.env.AZURE_TENANT_ID}/oauth2/v2.0/token`;
 
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: this.env.AZURE_CLIENT_ID,
-        client_secret: this.env.AZURE_CLIENT_SECRET,
-        scope,
-        grant_type: 'client_credentials',
-      }),
-    });
+    const authController = new AbortController();
+    const authTimeout = setTimeout(() => authController.abort(), 10000);
+
+    let response: Response;
+    try {
+      response = await fetch(tokenUrl, {
+        method: 'POST',
+        signal: authController.signal,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: this.env.AZURE_CLIENT_ID,
+          client_secret: this.env.AZURE_CLIENT_SECRET,
+          scope,
+          grant_type: 'client_credentials',
+        }),
+      });
+    } catch (error) {
+      clearTimeout(authTimeout);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Microsoft authentication timeout (10s) for scope ${scope}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(authTimeout);
+    }
 
     if (!response.ok) {
       const error = await response.text();
@@ -336,37 +351,65 @@ export class MicrosoftClient {
   private async graphRequest<T>(endpoint: string): Promise<T> {
     const token = await this.authenticate();
     const url = `${this.graphUrl}${endpoint}`;
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Graph API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Graph API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Graph API timeout (20s): ${endpoint.split('?')[0]}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json() as Promise<T>;
   }
 
   private async securityRequest<T>(endpoint: string): Promise<T> {
     const token = await this.authenticate('https://api.securitycenter.microsoft.com/.default');
     const url = `${this.securityUrl}${endpoint}`;
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Defender API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Defender API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Defender API timeout (20s): ${endpoint.split('?')[0]}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json() as Promise<T>;
   }
 
   // ─── Phase 1: Enriched existing methods ─────────────────────────────────
@@ -461,12 +504,27 @@ export class MicrosoftClient {
       ? `https://management.azure.com/subscriptions/${this.env.AZURE_SUBSCRIPTION_ID}/providers/Microsoft.Security/assessments?api-version=2021-06-01`
       : 'https://management.azure.com/providers/Microsoft.Security/assessments?api-version=2021-06-01';
 
-    const response = await fetch(baseUrl, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const azureController = new AbortController();
+    const azureTimeout = setTimeout(() => azureController.abort(), 20000);
+
+    let response: Response;
+    try {
+      response = await fetch(baseUrl, {
+        signal: azureController.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (error) {
+      clearTimeout(azureTimeout);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Azure Management API timeout (20s)');
+      }
+      throw error;
+    } finally {
+      clearTimeout(azureTimeout);
+    }
 
     if (!response.ok) {
       throw new Error(`Azure API error: ${response.status}`);

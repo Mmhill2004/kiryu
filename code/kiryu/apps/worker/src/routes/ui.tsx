@@ -43,6 +43,11 @@ uiRoutes.get('/', async (c) => {
   const msClient = new MicrosoftClient(c.env);
   const trendService = new TrendService(c.env);
 
+  // Timeout wrapper: resolves with undefined after specified ms
+  function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+    return Promise.race([promise, new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), ms))]);
+  }
+
   const fetchPromises: Promise<void>[] = [];
 
   // CrowdStrike: try cache first, then live API
@@ -62,12 +67,18 @@ uiRoutes.get('/', async (c) => {
         }
       }
 
-      // Fall back to live API
+      // Fall back to live API with 25s timeout
       try {
-        crowdstrike = await csClient.getFullSummary(daysBack, 30);
-        platforms.push({ platform: 'crowdstrike', status: 'healthy', last_sync: new Date().toISOString() });
-        await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
-        dataSource = 'live';
+        const result = await withTimeout(csClient.getFullSummary(daysBack, 30), 25000);
+        if (result) {
+          crowdstrike = result;
+          platforms.push({ platform: 'crowdstrike', status: 'healthy', last_sync: new Date().toISOString() });
+          await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
+          dataSource = 'live';
+        } else {
+          console.error('CrowdStrike fetch timed out (25s)');
+          platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: 'Request timeout' });
+        }
       } catch (error) {
         console.error('CrowdStrike fetch error:', error instanceof Error ? error.message : error);
         platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: 'Failed to connect' });
@@ -93,9 +104,15 @@ uiRoutes.get('/', async (c) => {
       }
 
       try {
-        salesforce = await sfClient.getDashboardMetrics();
-        platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
-        await cache.set(sfCacheKey, salesforce, CACHE_TTL.DASHBOARD_DATA);
+        const result = await withTimeout(sfClient.getDashboardMetrics(), 25000);
+        if (result) {
+          salesforce = result;
+          platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
+          await cache.set(sfCacheKey, salesforce, CACHE_TTL.DASHBOARD_DATA);
+        } else {
+          console.error('Salesforce fetch timed out (25s)');
+          platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: 'Request timeout' });
+        }
       } catch (error) {
         console.error('Salesforce fetch error:', error instanceof Error ? error.message : error);
         platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: 'Failed to connect' });
@@ -121,9 +138,15 @@ uiRoutes.get('/', async (c) => {
       }
 
       try {
-        microsoft = await msClient.getFullSummary();
-        platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: new Date().toISOString() });
-        await cache.set(msCacheKey, microsoft, CACHE_TTL.DASHBOARD_DATA);
+        const result = await withTimeout(msClient.getFullSummary(), 25000);
+        if (result) {
+          microsoft = result;
+          platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: new Date().toISOString() });
+          await cache.set(msCacheKey, microsoft, CACHE_TTL.DASHBOARD_DATA);
+        } else {
+          console.error('Microsoft fetch timed out (25s)');
+          platforms.push({ platform: 'microsoft', status: 'error', last_sync: null, error_message: 'Request timeout' });
+        }
       } catch (error) {
         console.error('Microsoft fetch error:', error instanceof Error ? error.message : error);
         platforms.push({ platform: 'microsoft', status: 'error', last_sync: null, error_message: 'Failed to connect' });
@@ -145,7 +168,7 @@ uiRoutes.get('/', async (c) => {
       .catch(err => console.error('SF trend fetch error:', err))
   );
 
-  // Wait for all fetches to complete
+  // Wait for all fetches to complete (individual timeouts above prevent indefinite hang)
   await Promise.all(fetchPromises);
 
   // Add other platforms as not configured for now

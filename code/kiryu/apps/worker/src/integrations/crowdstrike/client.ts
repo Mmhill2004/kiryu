@@ -435,6 +435,7 @@ export class CrowdStrikeClient {
   private baseUrl: string;
   private token: CrowdStrikeToken | null = null;
   private cache: KVNamespace | null;
+  private pendingAuth: Promise<string> | null = null;
 
   constructor(private env: Env, cache?: KVNamespace) {
     this.baseUrl = env.CROWDSTRIKE_BASE_URL || 'https://api.crowdstrike.com';
@@ -449,13 +450,26 @@ export class CrowdStrikeClient {
   }
 
   /**
-   * Get OAuth2 access token
+   * Get OAuth2 access token (with in-flight deduplication)
    */
   private async authenticate(): Promise<string> {
+    // Fast path: in-memory token still valid
     if (this.token && this.token.expires_at > Date.now()) {
       return this.token.access_token;
     }
 
+    // Deduplicate concurrent auth calls
+    if (this.pendingAuth) return this.pendingAuth;
+
+    this.pendingAuth = this.authenticateInner();
+    try {
+      return await this.pendingAuth;
+    } finally {
+      this.pendingAuth = null;
+    }
+  }
+
+  private async authenticateInner(): Promise<string> {
     // Check KV cache
     if (this.cache) {
       try {
@@ -470,16 +484,31 @@ export class CrowdStrikeClient {
       } catch { /* ignore cache errors */ }
     }
 
-    const response = await fetch(`${this.baseUrl}/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: this.env.CROWDSTRIKE_CLIENT_ID,
-        client_secret: this.env.CROWDSTRIKE_CLIENT_SECRET,
-      }),
-    });
+    const authController = new AbortController();
+    const authTimeout = setTimeout(() => authController.abort(), 10000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/oauth2/token`, {
+        method: 'POST',
+        signal: authController.signal,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: this.env.CROWDSTRIKE_CLIENT_ID,
+          client_secret: this.env.CROWDSTRIKE_CLIENT_SECRET,
+        }),
+      });
+    } catch (error) {
+      clearTimeout(authTimeout);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('CrowdStrike authentication timeout (10s)');
+      }
+      throw error;
+    } finally {
+      clearTimeout(authTimeout);
+    }
 
     if (!response.ok) {
       const error = await response.text();
@@ -507,26 +536,39 @@ export class CrowdStrikeClient {
   }
 
   /**
-   * Make authenticated API request
+   * Make authenticated API request with timeout
    */
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = await this.authenticate();
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`CrowdStrike API error: ${response.status} ${error}`);
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`CrowdStrike API error: ${response.status} ${error}`);
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`CrowdStrike API timeout (20s): ${endpoint.split('?')[0]}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json() as Promise<T>;
   }
 
   // ============================================

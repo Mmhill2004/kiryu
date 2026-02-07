@@ -18,6 +18,17 @@ export const Layout: FC<PropsWithChildren<{ title?: string }>> = ({ children, ti
         <div class="gradient-orb gradient-orb-1"></div>
         <div class="gradient-orb gradient-orb-2"></div>
         {children}
+        <script>{`
+          function switchTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+            document.getElementById('tab-' + name).classList.add('active');
+            var btns = document.querySelectorAll('.tab-btn');
+            for (var i = 0; i < btns.length; i++) {
+              if (btns[i].getAttribute('data-tab') === name) { btns[i].classList.add('active'); }
+            }
+          }
+        `}</script>
       </body>
     </html>
   );
@@ -1097,12 +1108,64 @@ const styles = `
     }
   }
 
+  /* Tab navigation */
+  .tab-nav {
+    display: flex;
+    gap: 0;
+    margin-bottom: var(--space-lg);
+    border-bottom: 2px solid var(--border-default);
+  }
+
+  .tab-btn {
+    padding: var(--space-sm) var(--space-lg);
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    border-radius: 0;
+    transition: color 0.2s, border-color 0.2s;
+    backdrop-filter: none;
+  }
+
+  .tab-btn:hover {
+    color: var(--text-secondary);
+    background: transparent;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+  }
+
+  .tab-content {
+    display: none;
+  }
+
+  .tab-content.active {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: var(--space-lg);
+  }
+
   /* Print styles */
   @media print {
     .noise-overlay,
     .gradient-orb,
-    .refresh-btn {
+    .refresh-btn,
+    .tab-nav {
       display: none !important;
+    }
+
+    .tab-content {
+      display: grid !important;
+      grid-template-columns: repeat(12, 1fr);
+      gap: var(--space-lg);
     }
 
     body {

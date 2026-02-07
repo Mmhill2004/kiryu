@@ -34,7 +34,10 @@ export class TrendService {
     try {
       const totalDays = periodDays * 2;
       const rows = await this.env.DB.prepare(`
-        SELECT * FROM crowdstrike_metrics_daily
+        SELECT date, alerts_total, alerts_critical, hosts_total, hosts_online,
+               incidents_open, zta_avg_score, security_score,
+               ngsiem_events_total, overwatch_total_detections
+        FROM crowdstrike_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
       `).bind(totalDays).all();
@@ -71,7 +74,9 @@ export class TrendService {
     try {
       const totalDays = periodDays * 2;
       const rows = await this.env.DB.prepare(`
-        SELECT * FROM ticket_metrics_daily
+        SELECT date, total_open, avg_resolution_minutes,
+               sla_compliance_rate, escalation_rate
+        FROM ticket_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
       `).bind(totalDays).all();
