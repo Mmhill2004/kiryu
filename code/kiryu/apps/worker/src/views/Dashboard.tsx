@@ -4,7 +4,7 @@ import { SecurityScore } from './components/SecurityScore';
 import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
 import { PlatformStatus } from './components/PlatformStatus';
-import type { AlertSummary, HostSummary, IncidentSummary, ZTASummary, NGSIEMSummary, OverWatchSummary } from '../integrations/crowdstrike/client';
+import type { AlertSummary, HostSummary, CrowdScoreSummary, IDPSummary, DiscoverSummary, SensorUsageSummary, IntelSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
 import type { CrowdStrikeTrends, SalesforceTrends } from '../services/trends';
@@ -13,10 +13,11 @@ interface DashboardData {
   crowdstrike: {
     alerts: AlertSummary;
     hosts: HostSummary;
-    incidents: IncidentSummary;
-    zta: ZTASummary;
-    ngsiem: NGSIEMSummary;
-    overwatch: OverWatchSummary;
+    crowdScore: CrowdScoreSummary | null;
+    identity: IDPSummary | null;
+    discover: DiscoverSummary | null;
+    sensors: SensorUsageSummary | null;
+    intel: IntelSummary | null;
     fetchedAt: string;
     errors?: string[];
   } | null;
@@ -902,7 +903,134 @@ export const Dashboard: FC<Props> = ({ data }) => {
               </div>
             )}
 
-            {/* Row 7: Recent Security Tickets (Salesforce) */}
+            {/* Row 7: CrowdStrike Extended — CrowdScore, IDP, Discover, Intel */}
+            {crowdstrike && (crowdstrike.crowdScore || crowdstrike.identity || crowdstrike.discover || crowdstrike.intel) && (
+              <div class="col-12">
+                <div class="card-title" style="margin-bottom: 1rem;">CrowdStrike Extended Intelligence</div>
+                <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                  <MetricCard
+                    label="CrowdScore"
+                    value={crowdstrike.crowdScore ? crowdstrike.crowdScore.current : 'N/A'}
+                    severity={crowdstrike.crowdScore && crowdstrike.crowdScore.current >= 80 ? 'critical' : crowdstrike.crowdScore && crowdstrike.crowdScore.current >= 60 ? 'high' : crowdstrike.crowdScore && crowdstrike.crowdScore.current >= 40 ? 'medium' : undefined}
+                    source="CS"
+                  />
+                  <MetricCard
+                    label="IDP Detections"
+                    value={crowdstrike.identity ? crowdstrike.identity.total : 'N/A'}
+                    severity={crowdstrike.identity && crowdstrike.identity.bySeverity.critical > 0 ? 'critical' : crowdstrike.identity && crowdstrike.identity.bySeverity.high > 0 ? 'high' : undefined}
+                    source="CS"
+                  />
+                  <MetricCard
+                    label="Unmanaged Assets"
+                    value={crowdstrike.discover ? crowdstrike.discover.unmanagedAssets : 'N/A'}
+                    severity={crowdstrike.discover && crowdstrike.discover.unmanagedAssets > 100 ? 'medium' : undefined}
+                    source="CS"
+                  />
+                  <MetricCard
+                    label="Sensor Coverage"
+                    value={crowdstrike.discover ? `${crowdstrike.discover.sensorCoverage.toFixed(1)}%` : 'N/A'}
+                    severity={crowdstrike.discover && crowdstrike.discover.sensorCoverage < 50 ? 'high' : undefined}
+                    source="CS"
+                  />
+                  <MetricCard
+                    label="Threat Indicators"
+                    value={crowdstrike.intel ? crowdstrike.intel.indicatorCount.toLocaleString() : 'N/A'}
+                    source="CS"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Row 7b: CrowdStrike Detail Cards — IDP, Discover, Intel */}
+            {crowdstrike && (
+              <>
+                {crowdstrike.identity && crowdstrike.identity.total > 0 && (
+                  <div class="card col-4">
+                    <div class="card-title">Identity Protection ({crowdstrike.identity.total})</div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                      {Object.entries(crowdstrike.identity.bySeverity)
+                        .filter(([, count]) => count > 0)
+                        .map(([sev, count]) => (
+                          <span key={sev} class={`badge badge-${sev === 'critical' ? 'critical' : sev === 'high' ? 'high' : sev === 'medium' ? 'medium' : sev === 'low' ? 'low' : 'info'}`}>
+                            {sev}: {count}
+                          </span>
+                        ))}
+                    </div>
+                    <div style="border-top: 1px solid var(--border-subtle); padding-top: 0.75rem;">
+                      <div class="stat-label" style="margin-bottom: 0.5rem;">By Type:</div>
+                      {Object.entries(crowdstrike.identity.byType)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([type, count]) => (
+                          <div class="stat-row" key={type}>
+                            <span class="stat-label">{type}</span>
+                            <span class="stat-value">{count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {crowdstrike.discover && (
+                  <div class="card col-4">
+                    <div class="card-title">Asset Discovery</div>
+                    <div class="stat-row">
+                      <span class="stat-label">Total Applications</span>
+                      <span class="stat-value">{crowdstrike.discover.totalApplications.toLocaleString()}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Managed Assets</span>
+                      <span class="stat-value">{crowdstrike.discover.managedAssets}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Unmanaged Assets</span>
+                      <span class="stat-value severity-medium">{crowdstrike.discover.unmanagedAssets.toLocaleString()}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Sensor Coverage</span>
+                      <span class={`stat-value ${crowdstrike.discover.sensorCoverage < 50 ? 'severity-high' : crowdstrike.discover.sensorCoverage < 80 ? 'severity-medium' : ''}`}>
+                        {crowdstrike.discover.sensorCoverage.toFixed(1)}%
+                      </span>
+                    </div>
+                    {crowdstrike.sensors && (
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">Sensors:</div>
+                        <div class="stat-row">
+                          <span class="stat-label">Total Deployed</span>
+                          <span class="stat-value">{crowdstrike.sensors.totalSensors}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {crowdstrike.intel && (
+                  <div class="card col-4">
+                    <div class="card-title">Threat Intelligence</div>
+                    <div class="stat-row">
+                      <span class="stat-label">Total Indicators</span>
+                      <span class="stat-value">{crowdstrike.intel.indicatorCount.toLocaleString()}</span>
+                    </div>
+                    <div class="stat-row">
+                      <span class="stat-label">Recent Reports</span>
+                      <span class="stat-value">{crowdstrike.intel.recentReports.length}</span>
+                    </div>
+                    {crowdstrike.intel.recentActors.length > 0 && (
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div class="stat-label" style="margin-bottom: 0.5rem;">Recent Threat Actors:</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                          {crowdstrike.intel.recentActors.slice(0, 5).map((actor) => (
+                            <span key={actor.id} class="badge badge-info">{actor.name}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Row 8: Recent Security Tickets (Salesforce) */}
             {salesforce && salesforce.recentTickets.length > 0 && (
               <div class="card col-12">
                 <div class="card-title">Open Security Tickets</div>
