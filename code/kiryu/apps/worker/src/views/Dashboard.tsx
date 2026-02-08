@@ -84,8 +84,8 @@ export const Dashboard: FC<Props> = ({ data }) => {
   }
 
   return (
-    <Layout title="Security Dashboard">
-      {/* Header */}
+    <Layout title="Kiryu &mdash; Security Operations">
+      {/* ═══ HEADER ═══ */}
       <header>
         <div class="header-left">
           <div class="logo-mark">
@@ -95,10 +95,13 @@ export const Dashboard: FC<Props> = ({ data }) => {
             </svg>
           </div>
           <div class="header-title">
-            <h1>Security Operations</h1>
+            <h1>Kiryu</h1>
             <p>
-              CrowdStrike Falcon &bull; Salesforce Service Cloud
-              {microsoft && <> &bull; Microsoft Security</>}
+              {[
+                crowdstrike && 'CrowdStrike',
+                salesforce && 'Salesforce',
+                microsoft && 'Microsoft',
+              ].filter(Boolean).join(' / ') || 'Security Operations'}
             </p>
           </div>
         </div>
@@ -138,7 +141,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         </div>
       </header>
 
-      {/* Error/Warning banners */}
+      {/* ═══ ERROR / WARNING BANNERS ═══ */}
       {(() => {
         const csStatus = platforms.find(p => p.platform === 'crowdstrike');
         const sfStatus = platforms.find(p => p.platform === 'salesforce');
@@ -156,7 +159,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
         if (hasErrors || hasPartialErrors) {
           return (
-            <div class="error-banner" style="background: #fef3c7; border-color: #f59e0b;">
+            <div class="error-banner warning-banner">
               <strong>Warning:</strong> Some data could not be loaded.
               {csStatus?.status === 'error' && (
                 <div style="margin-top: 0.5rem;">
@@ -195,69 +198,70 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
       {crowdstrike || salesforce || microsoft ? (
         <>
-          {/* ═══ TOP AREA: Always Visible ═══ */}
-          <div class="grid">
-            {/* Security Score + Microsoft Security KPIs */}
+          {/* ═══ TOP AREA ═══ */}
+          <div class="grid" style="margin-bottom: var(--sp-6);">
+            {/* Security Score */}
             <div class="card col-3">
               <div class="card-title">Security Score</div>
               <SecurityScore score={securityScore} />
             </div>
 
+            {/* Microsoft KPIs or summary */}
             <div class="col-9">
-              <div class="card-title" style="margin-bottom: 1rem;">Microsoft Security</div>
+              <div class="section-header">Microsoft Security Overview</div>
               {microsoft ? (
-                <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
-                  <MetricCard
-                    label="Secure Score"
-                    value={microsoft.secureScore
-                      ? `${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%`
-                      : 'N/A'}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Active Alerts"
-                    value={microsoft.alertAnalytics.active}
-                    severity={microsoft.alertAnalytics.bySeverity.high > 0 ? 'high' : undefined}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Risky Users"
-                    value={microsoft.identity.riskyUsers.unresolvedCount}
-                    severity={microsoft.identity.riskyUsers.byRiskLevel.high > 0 ? 'critical' : microsoft.identity.riskyUsers.unresolvedCount > 0 ? 'high' : undefined}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Open Incidents"
-                    value={microsoft.incidents.open}
-                    severity={microsoft.incidents.bySeverity.high > 0 ? 'high' : undefined}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Managed Endpoints"
-                    value={microsoft.machines.total}
-                    source="MS"
-                  />
-                  <MetricCard
-                    label="Cloud Pass Rate"
-                    value={`${microsoft.assessments.passRate}%`}
-                    severity={microsoft.assessments.passRate < 70 ? 'critical' : microsoft.assessments.passRate < 85 ? 'medium' : undefined}
-                    source="MS"
-                  />
+                <div class="kpi-strip">
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${microsoft.secureScore ? '' : 'severity-medium'}`}>
+                      {microsoft.secureScore
+                        ? `${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%`
+                        : 'N/A'}
+                    </div>
+                    <div class="kpi-label">Secure Score</div>
+                  </div>
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${microsoft.alertAnalytics.bySeverity.high > 0 ? 'severity-high' : ''}`}>
+                      {microsoft.alertAnalytics.active}
+                    </div>
+                    <div class="kpi-label">Active Alerts</div>
+                  </div>
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${microsoft.identity.riskyUsers.unresolvedCount > 0 ? 'severity-critical' : ''}`}>
+                      {microsoft.identity.riskyUsers.unresolvedCount}
+                    </div>
+                    <div class="kpi-label">Risky Users</div>
+                  </div>
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${microsoft.incidents.bySeverity.high > 0 ? 'severity-high' : ''}`}>
+                      {microsoft.incidents.open}
+                    </div>
+                    <div class="kpi-label">Open Incidents</div>
+                  </div>
+                  <div class="kpi-item">
+                    <div class="kpi-value">{microsoft.machines.total}</div>
+                    <div class="kpi-label">Endpoints</div>
+                  </div>
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${microsoft.assessments.passRate < 70 ? 'severity-critical' : microsoft.assessments.passRate < 85 ? 'severity-medium' : ''}`}>
+                      {microsoft.assessments.passRate}%
+                    </div>
+                    <div class="kpi-label">Cloud Pass Rate</div>
+                  </div>
                 </div>
               ) : (
                 <p class="no-data">Microsoft not configured</p>
               )}
             </div>
 
-            {/* Platform Status - Compact */}
+            {/* Platform Status */}
             <div class="col-12">
-              <div class="card-title">Platform Integrations</div>
+              <div class="section-header">Platform Status</div>
               <PlatformStatus platforms={platforms} horizontal />
             </div>
           </div>
 
           {/* ═══ TAB BAR ═══ */}
-          <div class="tab-nav" style="margin-top: var(--space-lg);">
+          <div class="tab-nav">
             <button class="tab-btn active" data-tab="crowdstrike" onclick="switchTab('crowdstrike')">CrowdStrike</button>
             <button class="tab-btn" data-tab="microsoft" onclick="switchTab('microsoft')">Microsoft</button>
             <button class="tab-btn" data-tab="salesforce" onclick="switchTab('salesforce')">Salesforce</button>
@@ -269,7 +273,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
               <>
                 {/* Endpoint Overview */}
                 <div class="col-12">
-                  <div class="card-title" style="margin-bottom: 1rem;">Endpoint Overview</div>
+                  <div class="section-header">Endpoint Overview</div>
                   <div class="metric-grid">
                     <MetricCard
                       label="Total Endpoints"
@@ -301,7 +305,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 {/* Active Alerts by Severity */}
                 <div class="col-12">
-                  <div class="card-title" style="margin-bottom: 1rem;">Active Alerts by Severity</div>
+                  <div class="section-header">Active Alerts by Severity</div>
                   <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
                     <MetricCard
                       label="Critical"
@@ -338,7 +342,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 {/* Alert Status */}
                 <div class="col-12">
-                  <div class="card-title" style="margin-bottom: 1rem;">Alert Status</div>
+                  <div class="section-header">Alert Status</div>
                   <div class="metric-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <MetricCard
                       label="Total Alerts"
@@ -369,7 +373,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 {/* Extended Intelligence KPIs */}
                 {(crowdstrike.crowdScore || crowdstrike.identity || crowdstrike.discover || crowdstrike.intel) && (
                   <div class="col-12">
-                    <div class="card-title" style="margin-bottom: 1rem;">CrowdStrike Extended Intelligence</div>
+                    <div class="section-header">Extended Intelligence</div>
                     <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
                       <MetricCard
                         label="CrowdScore"
@@ -462,7 +466,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 {/* Host Containment Status */}
                 <div class="col-12">
-                  <div class="card-title" style="margin-bottom: 1rem;">Host Containment Status</div>
+                  <div class="section-header">Host Containment Status</div>
                   <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
                     <MetricCard
                       label="Normal"
@@ -509,7 +513,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                           </span>
                         ))}
                     </div>
-                    <div style="border-top: 1px solid var(--border-subtle); padding-top: 0.75rem;">
+                    <div style="border-top: 1px solid var(--border-dim); padding-top: 0.75rem;">
                       <div class="stat-label" style="margin-bottom: 0.5rem;">By Type:</div>
                       {Object.entries(crowdstrike.identity.byType)
                         .sort((a, b) => b[1] - a[1])
@@ -546,7 +550,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       </span>
                     </div>
                     {crowdstrike.sensors && (
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">Sensors:</div>
                         <div class="stat-row">
                           <span class="stat-label">Total Deployed</span>
@@ -569,7 +573,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       <span class="stat-value">{crowdstrike.intel.recentReports.length}</span>
                     </div>
                     {crowdstrike.intel.recentActors.length > 0 && (
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">Recent Threat Actors:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           {crowdstrike.intel.recentActors.slice(0, 5).map((actor) => (
@@ -642,7 +646,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <span class="stat-label">Unassigned</span>
                     <span class="stat-value severity-medium">{microsoft.alertAnalytics.unassigned}</span>
                   </div>
-                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                     <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                       <span class="badge badge-critical">High: {microsoft.alertAnalytics.bySeverity.high}</span>
@@ -652,7 +656,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
                   {Object.keys(microsoft.alertAnalytics.byCategory).length > 0 && (
-                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                       <div class="stat-label" style="margin-bottom: 0.5rem;">Top Categories:</div>
                       {Object.entries(microsoft.alertAnalytics.byCategory)
                         .sort((a, b) => b[1] - a[1])
@@ -677,7 +681,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <span class="stat-label">Linked to Incidents</span>
                     <span class="stat-value">{microsoft.defenderAnalytics.linkedToIncidents}</span>
                   </div>
-                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                     <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                       <span class="badge badge-critical">High: {microsoft.defenderAnalytics.bySeverity.high}</span>
@@ -687,7 +691,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
                   {Object.keys(microsoft.defenderAnalytics.byDetectionSource).length > 0 && (
-                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                       <div class="stat-label" style="margin-bottom: 0.5rem;">Detection Sources:</div>
                       {Object.entries(microsoft.defenderAnalytics.byDetectionSource)
                         .sort((a, b) => b[1] - a[1])
@@ -718,7 +722,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         <span class="stat-label">Confirmed Compromised</span>
                         <span class="stat-value severity-critical">{microsoft.identity.riskyUsers.byRiskState.confirmedCompromised}</span>
                       </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">By Risk Level:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           <span class="badge badge-critical">High: {microsoft.identity.riskyUsers.byRiskLevel.high}</span>
@@ -726,7 +730,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                           <span class="badge badge-low">Low: {microsoft.identity.riskyUsers.byRiskLevel.low}</span>
                         </div>
                       </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">By State:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           <span class="badge badge-critical">At Risk: {microsoft.identity.riskyUsers.byRiskState.atRisk}</span>
@@ -757,7 +761,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         <span class="stat-label">Redirected</span>
                         <span class="stat-value">{microsoft.incidents.redirected}</span>
                       </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">By Severity:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           <span class="badge badge-critical">High: {microsoft.incidents.bySeverity.high}</span>
@@ -766,7 +770,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         </div>
                       </div>
                       {Object.keys(microsoft.incidents.byDetermination).length > 0 && (
-                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                           <div class="stat-label" style="margin-bottom: 0.5rem;">By Determination:</div>
                           {Object.entries(microsoft.incidents.byDetermination)
                             .sort((a, b) => b[1] - a[1])
@@ -797,7 +801,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         <span class="stat-label">Stale (7+ days)</span>
                         <span class="stat-value severity-medium">{microsoft.machines.stale}</span>
                       </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">By Risk Score:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           <span class="badge badge-critical">High: {microsoft.machines.byRiskScore.high}</span>
@@ -806,7 +810,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                           <span class="badge badge-info">None: {microsoft.machines.byRiskScore.none}</span>
                         </div>
                       </div>
-                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                      <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                         <div class="stat-label" style="margin-bottom: 0.5rem;">By Exposure:</div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                           <span class="badge badge-critical">High: {microsoft.machines.byExposureLevel.high}</span>
@@ -815,7 +819,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                         </div>
                       </div>
                       {Object.keys(microsoft.machines.byOsPlatform).length > 0 && (
-                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                           <div class="stat-label" style="margin-bottom: 0.5rem;">By OS:</div>
                           {Object.entries(microsoft.machines.byOsPlatform)
                             .sort((a, b) => b[1] - a[1])
@@ -851,7 +855,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       }
                     </>
                   )}
-                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                  <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                     <div class="stat-label" style="margin-bottom: 0.5rem;">Cloud Assessments ({microsoft.assessments.total}):</div>
                     <div class="stat-row">
                       <span class="stat-label">Pass Rate</span>
@@ -869,7 +873,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
                   {(microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown) > 0 && (
-                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-dim);">
                       <div class="stat-label" style="margin-bottom: 0.5rem;">Device Compliance:</div>
                       <div class="stat-row">
                         <span class="stat-label">Compliant</span>
@@ -972,7 +976,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
               <>
                 {/* Service Desk KPIs */}
                 <div class="col-12">
-                  <div class="card-title" style="margin-bottom: 1rem;">Service Desk Metrics</div>
+                  <div class="section-header">Service Desk Metrics</div>
                   <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
                     <MetricCard
                       label="Open Tickets"
@@ -1121,7 +1125,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         </>
       ) : null}
 
-      {/* Footer */}
+      {/* ═══ FOOTER ═══ */}
       <footer>
         <p>Last updated: {new Date(lastUpdated).toLocaleString()}</p>
         {dataSource === 'cache' && cachedAt && (
