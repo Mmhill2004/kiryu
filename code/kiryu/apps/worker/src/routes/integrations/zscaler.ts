@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../types/env';
 import { ZscalerClient } from '../../integrations/zscaler/client';
 import type { ZscalerFullSummary } from '../../integrations/zscaler/client';
+import { ZscalerAuth } from '../../integrations/zscaler/auth';
 import { CacheService, CACHE_TTL } from '../../services/cache';
 
 export const zscalerRoutes = new Hono<{ Bindings: Env }>();
@@ -229,32 +230,43 @@ zscalerRoutes.post('/risk360', async (c) => {
  */
 zscalerRoutes.get('/diagnostic', async (c) => {
   const client = new ZscalerClient(c.env);
+  const auth = new ZscalerAuth(c.env);
 
-  const zia = { configured: client.isZiaConfigured(), status: 'not_configured' };
-  const zpa = { configured: client.isZpaConfigured(), status: 'not_configured' };
+  // Test auth directly (not through summary which swallows errors)
+  const oneApi = { configured: auth.isOneApiConfigured(), status: 'not_configured', tokenUrl: '' };
+  const legacyZia = { configured: auth.isLegacyZiaConfigured(), status: 'not_configured' };
+  const legacyZpa = { configured: auth.isLegacyZpaConfigured(), status: 'not_configured' };
   const risk360 = { configured: true, status: 'checking' };
 
-  // Check ZIA
-  if (client.isZiaConfigured()) {
+  if (auth.isOneApiConfigured()) {
+    oneApi.tokenUrl = auth.getOneApiTokenUrl();
     try {
-      await client.getZiaSummary();
-      zia.status = 'ok';
+      await auth.getOneApiToken();
+      oneApi.status = 'ok';
     } catch (e) {
-      zia.status = `error: ${e instanceof Error ? e.message : String(e)}`;
+      oneApi.status = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
-  // Check ZPA
-  if (client.isZpaConfigured()) {
+  if (auth.isLegacyZiaConfigured()) {
     try {
-      await client.getZpaSummary();
-      zpa.status = 'ok';
+      await auth.getZiaSession();
+      legacyZia.status = 'ok';
+      await auth.releaseZiaSession();
     } catch (e) {
-      zpa.status = `error: ${e instanceof Error ? e.message : String(e)}`;
+      legacyZia.status = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
-  // Check Risk360 (always available — it's KV-backed)
+  if (auth.isLegacyZpaConfigured()) {
+    try {
+      await auth.getZpaToken();
+      legacyZpa.status = 'ok';
+    } catch (e) {
+      legacyZpa.status = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
   try {
     const scores = await client.getRisk360Scores();
     risk360.status = scores ? 'ok' : 'no_data';
@@ -262,18 +274,68 @@ zscalerRoutes.get('/diagnostic', async (c) => {
     risk360.status = `error: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  const details = { zia, zpa, risk360 };
-  const available = Object.entries(details)
-    .filter(([, v]) => v.status === 'ok')
-    .map(([k]) => k);
-  const unavailable = Object.entries(details)
-    .filter(([, v]) => v.status !== 'ok')
-    .map(([k, v]) => ({ module: k, status: v.status }));
+  const authOk = oneApi.status === 'ok' || legacyZia.status === 'ok';
+  const zpaAuthOk = oneApi.status === 'ok' || legacyZpa.status === 'ok';
+
+  // Raw API probe: try one ZIA and one ZPA call to see actual HTTP responses
+  const apiProbe = { zia: 'skipped', zpa: 'skipped' };
+  if (authOk) {
+    try {
+      await auth.ziaFetch('/api/v1/status');
+      apiProbe.zia = 'ok';
+    } catch (e) {
+      apiProbe.zia = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  if (zpaAuthOk && c.env.ZSCALER_ZPA_CUSTOMER_ID) {
+    try {
+      await auth.zpaFetch(`/mgmtconfig/v1/admin/customers/${c.env.ZSCALER_ZPA_CUSTOMER_ID}/connector?page=1&pageSize=1`);
+      apiProbe.zpa = 'ok';
+    } catch (e) {
+      apiProbe.zpa = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  // Per-endpoint ZIA probe to find which calls fail
+  const ziaEndpoints: Record<string, string> = {};
+  if (authOk) {
+    const paths = [
+      '/api/v1/security/advanced',
+      '/api/v1/urlFilteringRules',
+      '/api/v1/firewallRules',
+      '/api/v1/dlpRules',
+      '/api/v1/dlpDictionaries',
+      '/api/v1/locations',
+      '/api/v1/users?page=1&pageSize=1',
+      '/api/v1/sslSettings',
+      '/api/v1/status',
+    ];
+    const results = await Promise.allSettled(
+      paths.map(async (p) => {
+        try { await auth.ziaFetch(p); return 'ok'; }
+        catch (e) { return `error: ${e instanceof Error ? e.message : String(e)}`; }
+      })
+    );
+    for (let i = 0; i < paths.length; i++) {
+      const r = results[i]!;
+      ziaEndpoints[paths[i]!] = r.status === 'fulfilled' ? r.value : `rejected: ${r.reason}`;
+    }
+  }
 
   return c.json({
     configured: client.isConfigured(),
-    available,
-    unavailable,
-    details,
+    auth: { oneApi, legacyZia, legacyZpa },
+    endpoints: {
+      ziaBaseUrl: auth.getZiaBaseUrl(),
+      zpaBaseUrl: auth.getZpaBaseUrl(),
+    },
+    apiProbe,
+    ziaEndpoints,
+    modules: {
+      zia: { configured: client.isZiaConfigured(), authOk },
+      zpa: { configured: client.isZpaConfigured(), authOk: zpaAuthOk },
+      risk360,
+    },
+    vanityDomain: c.env.ZSCALER_VANITY_DOMAIN ? `${c.env.ZSCALER_VANITY_DOMAIN.substring(0, 4)}***` : 'not set',
   });
 });

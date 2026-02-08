@@ -75,9 +75,28 @@ export class ZscalerAuth {
     }
   }
 
+  getOneApiTokenUrl(): string {
+    return `https://${this.sanitizeVanityDomain()}.zslogin.net/oauth2/v1/token`;
+  }
+
+  /** Strip common suffixes if user set the full domain instead of just the vanity part */
+  private sanitizeVanityDomain(): string {
+    let vanity = (this.env.ZSCALER_VANITY_DOMAIN || '').trim();
+    // Strip protocol if present
+    vanity = vanity.replace(/^https?:\/\//, '');
+    // Strip known suffixes
+    for (const suffix of ['.zslogin.net', '.zscaler.net', '.zscloud.net']) {
+      if (vanity.endsWith(suffix)) {
+        vanity = vanity.slice(0, -suffix.length);
+      }
+    }
+    // Strip trailing slashes or paths
+    vanity = vanity.split('/')[0] ?? vanity;
+    return vanity;
+  }
+
   private async fetchOneApiToken(): Promise<string> {
-    const vanity = this.env.ZSCALER_VANITY_DOMAIN!;
-    const url = `https://${vanity}.zslogin.net/oauth2/v1/token`;
+    const url = this.getOneApiTokenUrl();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), OAUTH_TIMEOUT);
