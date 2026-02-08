@@ -41,7 +41,7 @@ salesforceRoutes.get('/tickets', async (c) => {
   const limit = safeInt(c.req.query('limit'), 100, 500);
 
   try {
-    const tickets = await client.getSecurityTickets(days, limit);
+    const tickets = await client.getTickets(days, limit);
     return c.json({
       success: true,
       count: tickets.length,

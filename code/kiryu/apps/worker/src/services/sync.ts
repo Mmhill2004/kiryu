@@ -434,7 +434,7 @@ export class SyncService {
       return { platform: 'salesforce', status: 'skipped', error: 'Not configured' };
     }
 
-    const tickets = await client.getSecurityTickets(30, 2000);
+    const tickets = await client.getTickets(30, 2000);
 
     let recordsSynced = 0;
 

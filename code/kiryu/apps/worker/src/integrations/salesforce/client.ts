@@ -43,6 +43,8 @@ interface CountResult {
 
 export interface TicketMetrics {
   openTickets: number;
+  createdToday: number;
+  closedToday: number;
   ticketsByPriority: Record<string, number>;
   ticketsByOrigin: Record<string, number>;
   mttr: {
@@ -242,9 +244,9 @@ export class SalesforceClient {
   }
 
   /**
-   * Get security-related tickets
+   * Get recent tickets
    */
-  async getSecurityTickets(days: number = 30, limit: number = 2000): Promise<SalesforceCase[]> {
+  async getTickets(days: number = 30, limit: number = 2000): Promise<SalesforceCase[]> {
     const soql = `
       SELECT
         Id, CaseNumber, Subject, Description, Status, Priority,
@@ -252,10 +254,7 @@ export class SalesforceClient {
         CreatedDate, ClosedDate, OwnerId, Owner.Name,
         ContactId, Contact.Name, AccountId, Account.Name
       FROM Case
-      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%'
-             OR Subject LIKE '%breach%' OR Subject LIKE '%malware%' OR Subject LIKE '%phishing%')
-        AND CreatedDate >= LAST_N_DAYS:${days}
+      WHERE CreatedDate >= LAST_N_DAYS:${days}
       ORDER BY CreatedDate DESC
       LIMIT ${limit}
     `;
@@ -270,8 +269,6 @@ export class SalesforceClient {
       SELECT Priority, COUNT(Id) cnt
       FROM Case
       WHERE IsClosed = false
-        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
       GROUP BY Priority
     `;
     return this.query<PriorityCount>(soql);
@@ -284,9 +281,7 @@ export class SalesforceClient {
     const soql = `
       SELECT Origin, COUNT(Id) cnt
       FROM Case
-      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
-        AND CreatedDate >= LAST_N_DAYS:${days}
+      WHERE CreatedDate >= LAST_N_DAYS:${days}
       GROUP BY Origin
     `;
     return this.query<OriginCount>(soql);
@@ -300,8 +295,6 @@ export class SalesforceClient {
       SELECT Id, CaseNumber, Priority, CreatedDate, ClosedDate
       FROM Case
       WHERE IsClosed = true
-        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
         AND ClosedDate >= LAST_N_DAYS:${days}
     `;
     return this.query<SalesforceCase>(soql);
@@ -315,8 +308,6 @@ export class SalesforceClient {
       SELECT Id, CaseNumber, Subject, Priority, Status, CreatedDate, Owner.Name
       FROM Case
       WHERE IsClosed = false
-        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
       ORDER BY CreatedDate ASC
     `;
     return this.query<SalesforceCase>(soql);
@@ -329,9 +320,20 @@ export class SalesforceClient {
     const soql = `
       SELECT COUNT(Id) cnt
       FROM Case
-      WHERE (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
-        AND CreatedDate = ${dateFilter}
+      WHERE CreatedDate = ${dateFilter}
+    `;
+    const result = await this.query<CountResult>(soql);
+    return result[0]?.cnt || 0;
+  }
+
+  /**
+   * Get count of tickets closed today
+   */
+  async getClosedTodayCount(): Promise<number> {
+    const soql = `
+      SELECT COUNT(Id) cnt
+      FROM Case
+      WHERE ClosedDate = TODAY
     `;
     const result = await this.query<CountResult>(soql);
     return result[0]?.cnt || 0;
@@ -345,8 +347,6 @@ export class SalesforceClient {
       SELECT COUNT(Id) cnt
       FROM Case
       WHERE IsEscalated = true
-        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
         AND CreatedDate >= LAST_N_DAYS:${days}
     `;
     const result = await this.query<CountResult>(soql);
@@ -361,8 +361,6 @@ export class SalesforceClient {
       SELECT Owner.Name ownerName, COUNT(Id) cnt
       FROM Case
       WHERE IsClosed = false
-        AND (Type = 'Security Incident' OR Type LIKE '%Security%' OR Type = 'Security'
-             OR Subject LIKE '%security%' OR Subject LIKE '%incident%')
       GROUP BY Owner.Name
       ORDER BY COUNT(Id) DESC
     `;
@@ -462,6 +460,8 @@ export class SalesforceClient {
       thisWeekCount,
       lastWeekCount,
       agentWorkload,
+      createdTodayCount,
+      closedTodayCount,
     ] = await Promise.all([
       this.getOpenTicketsByPriority(),
       this.getTicketsByOrigin(30),
@@ -471,6 +471,8 @@ export class SalesforceClient {
       this.getTicketCount('THIS_WEEK'),
       this.getTicketCount('LAST_WEEK'),
       this.getAgentWorkload(),
+      this.getTicketCount('TODAY'),
+      this.getClosedTodayCount(),
     ]);
 
     // Calculate derived metrics
@@ -522,6 +524,8 @@ export class SalesforceClient {
 
     return {
       openTickets: totalOpen,
+      createdToday: createdTodayCount,
+      closedToday: closedTodayCount,
       ticketsByPriority,
       ticketsByOrigin,
       mttr,
