@@ -76,10 +76,12 @@ export class ZPAClient {
           id?: string;
           name?: string;
           enabled?: boolean;
+          controlChannelStatus?: string;
           runtimeStatus?: string;
           currentVersion?: string;
           expectedVersion?: string;
           lastBrokerConnectTime?: string;
+          appConnectorGroupName?: string;
           connectorGroupName?: string;
         }>;
       }>(`${this.mgmtBase()}/connector?page=1&pageSize=500`);
@@ -93,7 +95,8 @@ export class ZPAClient {
       const list: ZPAConnector[] = [];
 
       for (const c of connectors) {
-        const status = c.runtimeStatus || 'UNKNOWN';
+        // API returns controlChannelStatus as the real health field; runtimeStatus is a fallback
+        const status = c.controlChannelStatus || c.runtimeStatus || 'UNKNOWN';
         const isHealthy = status === 'ZPN_STATUS_AUTHENTICATED';
         const isUnhealthy = status === 'ZPN_STATUS_DISCONNECTED';
 
@@ -105,7 +108,8 @@ export class ZPAClient {
           outdated++;
         }
 
-        const groupName = c.connectorGroupName || 'Ungrouped';
+        // API returns appConnectorGroupName; connectorGroupName is a fallback
+        const groupName = c.appConnectorGroupName || c.connectorGroupName || 'Ungrouped';
         const group = byGroup[groupName] ?? { total: 0, healthy: 0 };
         group.total++;
         if (isHealthy) group.healthy++;

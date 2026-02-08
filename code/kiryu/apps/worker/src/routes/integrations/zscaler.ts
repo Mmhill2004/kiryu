@@ -147,6 +147,22 @@ zscalerRoutes.get('/zpa/connectors', async (c) => {
   }
 });
 
+/**
+ * Raw ZPA connector response for debugging field names
+ */
+zscalerRoutes.get('/zpa/connectors/raw', async (c) => {
+  const auth = new ZscalerAuth(c.env);
+  const customerId = c.env.ZSCALER_ZPA_CUSTOMER_ID || '';
+  try {
+    const data = await auth.zpaFetch<unknown>(
+      `/mgmtconfig/v1/admin/customers/${customerId}/connector?page=1&pageSize=2`
+    );
+    return c.json(data);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 // ============================================
 // RISK360 ENDPOINTS
 // ============================================
