@@ -1,180 +1,141 @@
 import type { Env } from '../../types/env';
+import { ZscalerAuth } from './auth';
+import { ZIAClient, type ZIASummary } from './zia-client';
+import { ZPAClient, type ZPASummary } from './zpa-client';
 
-interface ZscalerSession {
-  cookie: string;
-  expires_at: number;
+export type { ZIASummary } from './zia-client';
+export type { ZPASummary, ZPAConnector } from './zpa-client';
+
+export interface Risk360Scores {
+  overallScore: number;
+  externalAttackSurface: number;
+  compromise: number;
+  lateralPropagation: number;
+  dataLoss: number;
+  updatedAt: string;
+  updatedBy: string;
 }
 
-interface SecurityEvent {
-  id: string;
-  datetime: string;
-  category: string;
-  severity: string;
-  url: string;
-  user: string;
-  action: string;
-  threatName?: string;
-}
-
-interface WebActivity {
-  totalTransactions: number;
-  blockedTransactions: number;
-  allowedTransactions: number;
-  bandwidth: number;
+export interface ZscalerFullSummary {
+  zia: ZIASummary | null;
+  zpa: ZPASummary | null;
+  risk360: Risk360Scores | null;
+  configured: boolean;
+  errors: string[];
 }
 
 export class ZscalerClient {
-  private baseUrl: string;
-  private session: ZscalerSession | null = null;
+  private auth: ZscalerAuth;
+  private zia: ZIAClient;
+  private zpa: ZPAClient;
+  private env: Env;
 
-  constructor(private env: Env) {
-    this.baseUrl = env.ZSCALER_BASE_URL || 'https://zsapi.zscaler.net/api/v1';
+  constructor(env: Env) {
+    this.env = env;
+    this.auth = new ZscalerAuth(env);
+    this.zia = new ZIAClient(this.auth);
+    this.zpa = new ZPAClient(this.auth, env.ZSCALER_ZPA_CUSTOMER_ID || '');
   }
 
-  /**
-   * Authenticate and get session
-   */
-  private async authenticate(): Promise<string> {
-    if (this.session && this.session.expires_at > Date.now()) {
-      return this.session.cookie;
+  isConfigured(): boolean {
+    return this.auth.isConfigured();
+  }
+
+  isZiaConfigured(): boolean {
+    return this.auth.isZiaConfigured();
+  }
+
+  isZpaConfigured(): boolean {
+    return this.auth.isZpaConfigured();
+  }
+
+  async getFullSummary(): Promise<ZscalerFullSummary> {
+    const errors: string[] = [];
+    const promises: [
+      Promise<ZIASummary | null>,
+      Promise<ZPASummary | null>,
+      Promise<Risk360Scores | null>,
+    ] = [
+      this.auth.isZiaConfigured()
+        ? this.zia.getSummary().catch(e => { errors.push(`ZIA: ${e}`); return null; })
+        : Promise.resolve(null),
+      this.auth.isZpaConfigured()
+        ? this.zpa.getSummary().catch(e => { errors.push(`ZPA: ${e}`); return null; })
+        : Promise.resolve(null),
+      this.getRisk360Scores(),
+    ];
+
+    const [zia, zpa, risk360] = await Promise.all(promises);
+
+    // Release legacy ZIA session after batch of calls
+    if (this.auth.isLegacyZiaConfigured() && !this.auth.isOneApiConfigured()) {
+      this.auth.releaseZiaSession().catch(() => {});
     }
 
-    const timestamp = Date.now().toString();
-    const apiKey = this.env.ZSCALER_API_KEY;
-    
-    // Zscaler uses a unique obfuscation for the API key
-    // This is a simplified version - check Zscaler docs for actual implementation
-    const obfuscatedKey = this.obfuscateApiKey(apiKey, timestamp);
+    return { zia, zpa, risk360, configured: this.isConfigured(), errors };
+  }
 
-    const response = await fetch(`${this.baseUrl}/authenticatedSession`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        apiKey: obfuscatedKey,
-        username: this.env.ZSCALER_API_KEY,
-        password: this.env.ZSCALER_API_SECRET,
-        timestamp,
-      }),
-    });
+  async getZiaSummary(): Promise<ZIASummary> {
+    return this.zia.getSummary();
+  }
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Zscaler authentication failed: ${error}`);
+  async getZpaSummary(): Promise<ZPASummary> {
+    return this.zpa.getSummary();
+  }
+
+  async getRisk360Scores(): Promise<Risk360Scores | null> {
+    try {
+      const raw = await this.env.CACHE.get('risk360:scores');
+      return raw ? JSON.parse(raw) as Risk360Scores : null;
+    } catch {
+      return null;
     }
+  }
 
-    // Get session cookie from response
-    const cookie = response.headers.get('set-cookie') || '';
-    
-    this.session = {
-      cookie,
-      expires_at: Date.now() + (30 * 60 * 1000), // 30 minute session
+  async setRisk360Scores(scores: Omit<Risk360Scores, 'updatedAt'>): Promise<void> {
+    const data: Risk360Scores = { ...scores, updatedAt: new Date().toISOString() };
+    await this.env.CACHE.put('risk360:scores', JSON.stringify(data));
+  }
+
+  async testConnection(): Promise<{
+    oneApi: { configured: boolean; status: string };
+    legacyZia: { configured: boolean; status: string };
+    legacyZpa: { configured: boolean; status: string };
+  }> {
+    const result = {
+      oneApi: { configured: this.auth.isOneApiConfigured(), status: 'not_configured' },
+      legacyZia: { configured: this.auth.isLegacyZiaConfigured(), status: 'not_configured' },
+      legacyZpa: { configured: this.auth.isLegacyZpaConfigured(), status: 'not_configured' },
     };
 
-    return this.session.cookie;
-  }
-
-  /**
-   * Obfuscate API key (Zscaler-specific)
-   */
-  private obfuscateApiKey(apiKey: string, _timestamp: string): string {
-    // Note: This is a placeholder. Zscaler has specific obfuscation requirements.
-    // Refer to Zscaler API documentation for the actual implementation.
-    return apiKey;
-  }
-
-  /**
-   * Make authenticated API request
-   */
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const cookie = await this.authenticate();
-
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Cookie': cookie,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Zscaler API error: ${response.status} ${error}`);
-    }
-
-    return response.json() as Promise<T>;
-  }
-
-  /**
-   * Get security events
-   */
-  async getSecurityEvents(hours = 24): Promise<SecurityEvent[]> {
-    const startTime = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-    const endTime = new Date().toISOString();
-
-    try {
-      // This endpoint may vary based on Zscaler product (ZIA, ZPA, etc.)
-      const response = await this.request<{ logs: SecurityEvent[] }>(
-        `/webApplicationRules/security?startTime=${startTime}&endTime=${endTime}`
-      );
-      return response.logs || [];
-    } catch (error) {
-      console.warn('Failed to get Zscaler security events:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get web activity summary
-   */
-  async getWebActivity(): Promise<WebActivity> {
-    try {
-      const response = await this.request<WebActivity>('/webActivity/summary');
-      return response;
-    } catch (error) {
-      console.warn('Failed to get web activity:', error);
-      return {
-        totalTransactions: 0,
-        blockedTransactions: 0,
-        allowedTransactions: 0,
-        bandwidth: 0,
-      };
-    }
-  }
-
-  /**
-   * Get blocked URL categories
-   */
-  async getBlockedCategories(): Promise<Array<{ category: string; count: number }>> {
-    try {
-      const response = await this.request<{ categories: Array<{ category: string; count: number }> }>(
-        '/urlCategories/blocked'
-      );
-      return response.categories || [];
-    } catch (error) {
-      console.warn('Failed to get blocked categories:', error);
-      return [];
-    }
-  }
-
-  /**
-   * End session (logout)
-   */
-  async logout(): Promise<void> {
-    if (this.session) {
+    if (this.auth.isOneApiConfigured()) {
       try {
-        await fetch(`${this.baseUrl}/authenticatedSession`, {
-          method: 'DELETE',
-          headers: {
-            'Cookie': this.session.cookie,
-          },
-        });
-      } catch (error) {
-        console.warn('Failed to logout from Zscaler:', error);
+        await this.auth.getOneApiToken();
+        result.oneApi.status = 'ok';
+      } catch (e) {
+        result.oneApi.status = `error: ${e}`;
       }
-      this.session = null;
     }
+
+    if (this.auth.isLegacyZiaConfigured()) {
+      try {
+        await this.auth.getZiaSession();
+        result.legacyZia.status = 'ok';
+        await this.auth.releaseZiaSession();
+      } catch (e) {
+        result.legacyZia.status = `error: ${e}`;
+      }
+    }
+
+    if (this.auth.isLegacyZpaConfigured()) {
+      try {
+        await this.auth.getZpaToken();
+        result.legacyZpa.status = 'ok';
+      } catch (e) {
+        result.legacyZpa.status = `error: ${e}`;
+      }
+    }
+
+    return result;
   }
 }

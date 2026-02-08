@@ -27,6 +27,13 @@ export interface SalesforceTrends {
   escalationRate: TrendData;
 }
 
+export interface ZscalerTrends {
+  zpaConnectorsHealthy: TrendData;
+  risk360Overall: TrendData;
+  ziaUrlFilterRulesEnabled: TrendData;
+  zpaAppsTotal: TrendData;
+}
+
 export class TrendService {
   constructor(private env: Env) {}
 
@@ -100,6 +107,40 @@ export class TrendService {
       };
     } catch (error) {
       console.error('Error fetching Salesforce trends:', error);
+      return null;
+    }
+  }
+
+  async getZscalerTrends(periodDays: number): Promise<ZscalerTrends | null> {
+    try {
+      const totalDays = periodDays * 2;
+      const rows = await this.env.DB.prepare(`
+        SELECT date, zpa_connectors_healthy, risk360_overall,
+               zia_url_filter_rules_enabled, zpa_apps_total
+        FROM zscaler_metrics_daily
+        WHERE date >= date('now', '-' || ? || ' days')
+        ORDER BY date ASC
+      `).bind(totalDays).all();
+
+      if (!rows.results || rows.results.length === 0) return null;
+
+      const midpoint = new Date();
+      midpoint.setDate(midpoint.getDate() - periodDays);
+      const midpointStr = midpoint.toISOString().split('T')[0];
+
+      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
+      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+
+      if (current.length === 0) return null;
+
+      return {
+        zpaConnectorsHealthy: this.buildTrend(current, previous, 'zpa_connectors_healthy'),
+        risk360Overall: this.buildTrend(current, previous, 'risk360_overall'),
+        ziaUrlFilterRulesEnabled: this.buildTrend(current, previous, 'zia_url_filter_rules_enabled'),
+        zpaAppsTotal: this.buildTrend(current, previous, 'zpa_apps_total'),
+      };
+    } catch (error) {
+      console.error('Error fetching Zscaler trends:', error);
       return null;
     }
   }

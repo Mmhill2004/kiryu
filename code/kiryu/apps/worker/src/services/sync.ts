@@ -42,6 +42,7 @@ export class SyncService {
         cacheService.invalidatePrefix('cs:summary'),
         cacheService.invalidatePrefix('sf:metrics'),
         cacheService.invalidatePrefix('ms:summary'),
+        cacheService.invalidatePrefix('zs:summary'),
       ]);
     } catch { /* ignore cache errors */ }
 
@@ -302,35 +303,82 @@ export class SyncService {
   }
 
   private async syncZscaler(): Promise<SyncResult> {
-    if (!this.env.ZSCALER_API_KEY || !this.env.ZSCALER_API_SECRET) {
+    const client = new ZscalerClient(this.env);
+    if (!client.isConfigured()) {
       return { platform: 'zscaler', status: 'skipped', error: 'Not configured' };
     }
 
-    const client = new ZscalerClient(this.env);
-    const events = await client.getSecurityEvents();
-
+    const summary = await client.getFullSummary();
     let recordsSynced = 0;
 
-    if (events.length > 0) {
-      const stmts = events.map(event =>
-        this.env.DB.prepare(`
-          INSERT OR REPLACE INTO security_events
-          (id, source, event_type, severity, title, description, threat_count, raw_data, created_at)
-          VALUES (?, 'zscaler', 'web_threat', ?, ?, ?, 1, ?, ?)
-        `).bind(
-          event.id || crypto.randomUUID(),
-          event.severity?.toLowerCase() || 'medium',
-          event.category || 'Web Threat',
-          event.url || '',
-          JSON.stringify(event),
-          event.datetime || new Date().toISOString()
+    // Store daily Zscaler metrics snapshot
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO zscaler_metrics_daily (
+          date,
+          zpa_connectors_total, zpa_connectors_healthy, zpa_connectors_unhealthy,
+          zpa_connectors_unknown, zpa_connectors_outdated,
+          zpa_apps_total, zpa_apps_enabled, zpa_apps_disabled,
+          zpa_server_groups, zpa_segment_groups, zpa_access_policies,
+          zia_atp_protections_enabled, zia_ssl_inspection_enabled,
+          zia_url_filter_rules_total, zia_url_filter_rules_enabled,
+          zia_firewall_rules_total, zia_firewall_rules_enabled,
+          zia_dlp_rules_total, zia_dlp_dictionaries,
+          zia_locations_total, zia_users_total,
+          zia_activation_pending, zia_admin_changes_24h,
+          risk360_overall, risk360_external_attack_surface,
+          risk360_compromise, risk360_lateral_propagation, risk360_data_loss,
+          metadata, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
         )
-      );
-      await this.env.DB.batch(stmts);
-      recordsSynced = events.length;
+      `).bind(
+        today,
+        summary.zpa?.connectors.total ?? 0,
+        summary.zpa?.connectors.healthy ?? 0,
+        summary.zpa?.connectors.unhealthy ?? 0,
+        summary.zpa?.connectors.unknown ?? 0,
+        summary.zpa?.connectors.outdated ?? 0,
+        summary.zpa?.applications.total ?? 0,
+        summary.zpa?.applications.enabled ?? 0,
+        summary.zpa?.applications.disabled ?? 0,
+        summary.zpa?.serverGroups.total ?? 0,
+        summary.zpa?.segmentGroups.total ?? 0,
+        summary.zpa?.accessPolicies.total ?? 0,
+        summary.zia?.securityPolicy.protectionCount ?? 0,
+        summary.zia?.sslInspection.enabled ? 1 : 0,
+        summary.zia?.urlFiltering.totalRules ?? 0,
+        summary.zia?.urlFiltering.enabledRules ?? 0,
+        summary.zia?.firewall.totalRules ?? 0,
+        summary.zia?.firewall.enabledRules ?? 0,
+        summary.zia?.dlp.totalRules ?? 0,
+        summary.zia?.dlp.totalDictionaries ?? 0,
+        summary.zia?.locations.total ?? 0,
+        summary.zia?.users.total ?? 0,
+        summary.zia?.activationPending ? 1 : 0,
+        summary.zia?.recentAdminChanges ?? 0,
+        summary.risk360?.overallScore ?? null,
+        summary.risk360?.externalAttackSurface ?? null,
+        summary.risk360?.compromise ?? null,
+        summary.risk360?.lateralPropagation ?? null,
+        summary.risk360?.dataLoss ?? null,
+        JSON.stringify({ errors: summary.errors })
+      ).run();
+      recordsSynced++;
+    } catch (error) {
+      console.error('Error storing zscaler_metrics_daily:', error);
     }
 
-    await this.updatePlatformStatus('zscaler', 'healthy');
+    await this.updatePlatformStatus('zscaler', 'healthy', {
+      zia_configured: client.isZiaConfigured(),
+      zpa_configured: client.isZpaConfigured(),
+      zpa_connectors_total: summary.zpa?.connectors.total ?? 0,
+      zpa_connectors_healthy: summary.zpa?.connectors.healthy ?? 0,
+      zia_protections: summary.zia?.securityPolicy.protectionCount ?? 0,
+      errors: summary.errors,
+    });
+
     return { platform: 'zscaler', status: 'success', recordsSynced };
   }
 
@@ -555,6 +603,7 @@ export class SyncService {
     const ALLOWED_CLEANUP = new Map([
       ['crowdstrike_metrics_daily', 'date'],
       ['ticket_metrics_daily', 'date'],
+      ['zscaler_metrics_daily', 'date'],
       ['daily_summaries', 'date'],
       ['security_events', 'created_at'],
       ['sync_logs', 'started_at'],
@@ -563,6 +612,7 @@ export class SyncService {
     const tables = [
       { name: 'crowdstrike_metrics_daily', dateCol: 'date' },
       { name: 'ticket_metrics_daily', dateCol: 'date' },
+      { name: 'zscaler_metrics_daily', dateCol: 'date' },
       { name: 'daily_summaries', dateCol: 'date' },
       { name: 'security_events', dateCol: 'created_at' },
       { name: 'sync_logs', dateCol: 'started_at' },

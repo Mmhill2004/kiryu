@@ -45,6 +45,22 @@ export interface ReportData {
     slaComplianceRate: number;
     escalationRate: number;
   } | null;
+  zscaler: {
+    risk360Overall: number | null;
+    risk360Stages: { externalAttackSurface: number; compromise: number; lateralPropagation: number; dataLoss: number } | null;
+    zpaConnectorsTotal: number;
+    zpaConnectorsHealthy: number;
+    zpaConnectorsUnhealthy: number;
+    zpaConnectorsOutdated: number;
+    zpaAppsTotal: number;
+    ziaProtectionsEnabled: number;
+    ziaSslInspectionEnabled: boolean;
+    ziaActivationPending: boolean;
+    ziaUrlFilterRules: number;
+    ziaFirewallRules: number;
+    ziaDlpRules: number;
+    unhealthyConnectorNames: string[];
+  } | null;
   platforms: Array<{ name: string; status: string; lastSync: string | null }>;
   recommendations: string[];
 }
@@ -100,6 +116,17 @@ export class ReportService {
       sfRows = result.results || [];
     } catch (error) {
       console.error('Error querying ticket metrics for report:', error);
+    }
+
+    // Query Zscaler metrics
+    let zsRows: any[] = [];
+    try {
+      const result = await this.env.DB.prepare(
+        `SELECT * FROM zscaler_metrics_daily WHERE date >= ? AND date < ? ORDER BY date DESC LIMIT 1`
+      ).bind(startDate, endDate).all();
+      zsRows = result.results || [];
+    } catch (error) {
+      console.error('Error querying Zscaler metrics for report:', error);
     }
 
     // Query platform status
@@ -260,6 +287,7 @@ export class ReportService {
         totalIngestGB: last(csRows, 'ngsiem_total_ingest_gb'),
       },
       serviceDesk,
+      zscaler: null,
       platforms: platformRows.map((p: any) => ({
         name: p.platform,
         status: p.status,
@@ -267,6 +295,34 @@ export class ReportService {
       })),
       recommendations: [],
     };
+
+    // Process Zscaler data
+    let zscalerData = null;
+    if (zsRows.length > 0) {
+      const zs = zsRows[0] as any;
+      zscalerData = {
+        risk360Overall: zs.risk360_overall ?? null,
+        risk360Stages: zs.risk360_overall != null ? {
+          externalAttackSurface: zs.risk360_external_attack_surface ?? 0,
+          compromise: zs.risk360_compromise ?? 0,
+          lateralPropagation: zs.risk360_lateral_propagation ?? 0,
+          dataLoss: zs.risk360_data_loss ?? 0,
+        } : null,
+        zpaConnectorsTotal: zs.zpa_connectors_total ?? 0,
+        zpaConnectorsHealthy: zs.zpa_connectors_healthy ?? 0,
+        zpaConnectorsUnhealthy: zs.zpa_connectors_unhealthy ?? 0,
+        zpaConnectorsOutdated: zs.zpa_connectors_outdated ?? 0,
+        zpaAppsTotal: zs.zpa_apps_total ?? 0,
+        ziaProtectionsEnabled: zs.zia_atp_protections_enabled ?? 0,
+        ziaSslInspectionEnabled: !!(zs.zia_ssl_inspection_enabled),
+        ziaActivationPending: !!(zs.zia_activation_pending),
+        ziaUrlFilterRules: zs.zia_url_filter_rules_enabled ?? 0,
+        ziaFirewallRules: zs.zia_firewall_rules_enabled ?? 0,
+        ziaDlpRules: zs.zia_dlp_rules_total ?? 0,
+        unhealthyConnectorNames: [],
+      };
+    }
+    reportData.zscaler = zscalerData;
 
     reportData.recommendations = this.generateRecommendations(reportData);
     return reportData;
@@ -305,6 +361,24 @@ export class ReportService {
 
     if (data.alerts.trend.changePercent > 20) {
       recs.push(`Alert volume increased by ${data.alerts.trend.changePercent}% compared to the previous period. Investigate whether this represents new threats or a change in detection coverage.`);
+    }
+
+    if (data.zscaler) {
+      if (data.zscaler.zpaConnectorsUnhealthy > 0) {
+        recs.push(`${data.zscaler.zpaConnectorsUnhealthy} ZPA connector(s) are unhealthy. Investigate disconnected connectors to restore private application access.`);
+      }
+      if (data.zscaler.risk360Overall !== null && data.zscaler.risk360Overall < 70) {
+        recs.push(`Risk360 score is ${data.zscaler.risk360Overall}/100, below the 70-point threshold. Review top risk factors in the Zscaler console.`);
+      }
+      if (!data.zscaler.ziaSslInspectionEnabled) {
+        recs.push('ZIA SSL inspection is disabled. Enable it for full threat visibility on encrypted traffic.');
+      }
+      if (data.zscaler.ziaActivationPending) {
+        recs.push('ZIA has configuration changes pending activation. Review and activate to apply security policy updates.');
+      }
+      if (data.zscaler.zpaConnectorsOutdated > 0) {
+        recs.push(`${data.zscaler.zpaConnectorsOutdated} ZPA connector(s) are running outdated software. Update to the latest version for security patches and improvements.`);
+      }
     }
 
     return recs.slice(0, 5);

@@ -6,6 +6,7 @@ import { ThreatChart } from './components/ThreatChart';
 import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, ZTASummary, CrowdScoreSummary, IDPSummary, DiscoverSummary, SensorUsageSummary, IntelSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
+import type { ZscalerFullSummary } from '../integrations/zscaler/client';
 import type { CrowdStrikeTrends, SalesforceTrends } from '../services/trends';
 
 interface DashboardData {
@@ -25,6 +26,7 @@ interface DashboardData {
   } | null;
   salesforce: TicketMetrics | null;
   microsoft: MicrosoftFullSummary | null;
+  zscaler: ZscalerFullSummary | null;
   platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -122,7 +124,7 @@ function calculateCompositeScore(
 }
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, microsoft, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
+  const { crowdstrike, salesforce, microsoft, zscaler, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
 
   const securityScore = calculateCompositeScore(crowdstrike, microsoft);
 
@@ -290,6 +292,8 @@ export const Dashboard: FC<Props> = ({ data }) => {
             <button class="tab-btn active" data-tab="crowdstrike">CrowdStrike</button>
             <button class="tab-btn" data-tab="microsoft">Microsoft</button>
             <button class="tab-btn" data-tab="salesforce">Salesforce</button>
+            <button class="tab-btn" data-tab="zia">ZIA</button>
+            <button class="tab-btn" data-tab="zpa">ZPA</button>
           </div>
 
           {/* ═══ CROWDSTRIKE TAB ═══ */}
@@ -733,6 +737,176 @@ export const Dashboard: FC<Props> = ({ data }) => {
             ) : (
               <div class="col-12">
                 <p class="no-data">Salesforce not configured</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ ZIA TAB ═══ */}
+          <div id="tab-zia" class="tab-content">
+            {zscaler?.zia ? (() => {
+              const zia = zscaler.zia;
+              return (
+                <>
+                  {/* Row 1: Key Metrics */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                      <MetricCard label="ATP Protections" value={zia.securityPolicy.protectionCount} source="ZS" compact
+                        severity={zia.securityPolicy.protectionCount < 10 ? 'medium' : undefined} />
+                      <MetricCard label="SSL Inspection" value={zia.sslInspection.enabled ? 'Enabled' : 'Disabled'} compact
+                        severity={!zia.sslInspection.enabled ? 'critical' : undefined} />
+                      <MetricCard label="Config Status" value={zia.activationPending ? 'Pending' : 'Active'} compact
+                        severity={zia.activationPending ? 'medium' : undefined} />
+                      <MetricCard label="Locations" value={zia.locations.total} compact />
+                      <MetricCard label="Managed Users" value={zia.users.total} compact />
+                      <MetricCard label="Admin Changes (24h)" value={zia.recentAdminChanges} compact
+                        severity={zia.recentAdminChanges > 10 ? 'medium' : undefined} />
+                    </div>
+                  </div>
+
+                  {/* Row 2: URL Filtering, Firewall, DLP */}
+                  <div class="card card-compact col-4">
+                    <div class="card-title">URL Filtering ({zia.urlFiltering.totalRules})</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Total" value={zia.urlFiltering.totalRules} compact />
+                      <MetricCard label="Enabled" value={zia.urlFiltering.enabledRules} compact />
+                      <MetricCard label="Block" value={zia.urlFiltering.byAction['BLOCK'] ?? 0} compact severity={((zia.urlFiltering.byAction['BLOCK'] ?? 0) > 0) ? 'high' : undefined} />
+                      <MetricCard label="Caution" value={zia.urlFiltering.byAction['CAUTION'] ?? 0} compact severity={((zia.urlFiltering.byAction['CAUTION'] ?? 0) > 0) ? 'medium' : undefined} />
+                    </div>
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Firewall Rules ({zia.firewall.totalRules})</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Total" value={zia.firewall.totalRules} compact />
+                      <MetricCard label="Enabled" value={zia.firewall.enabledRules} compact />
+                      <MetricCard label="Disabled" value={zia.firewall.disabledRules} compact
+                        severity={zia.firewall.disabledRules > 0 ? 'medium' : undefined} />
+                    </div>
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">DLP</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Total Rules" value={zia.dlp.totalRules} compact />
+                      <MetricCard label="Dictionaries" value={zia.dlp.totalDictionaries} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Protection Status */}
+                  <div class="card card-compact col-12">
+                    <div class="card-title">Protection Status</div>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                      {zia.securityPolicy.enabledProtections.map((p) => (
+                        <span key={p} class="badge badge-low">{p}</span>
+                      ))}
+                      {zia.securityPolicy.disabledProtections.map((p) => (
+                        <span key={p} class="badge badge-critical">{p}</span>
+                      ))}
+                      {zia.securityPolicy.enabledProtections.length === 0 && zia.securityPolicy.disabledProtections.length === 0 && (
+                        <p class="no-data">No protection data</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">Zscaler not configured</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ ZPA TAB ═══ */}
+          <div id="tab-zpa" class="tab-content">
+            {zscaler?.zpa ? (() => {
+              const zpa = zscaler.zpa;
+              return (
+                <>
+                  {/* Row 1: Key Metrics */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                      <MetricCard label="Connectors" value={`${zpa.connectors.healthy}/${zpa.connectors.total}`} source="ZS" compact
+                        severity={zpa.connectors.unhealthy > 0 ? 'critical' : undefined} />
+                      <MetricCard label="Unhealthy" value={zpa.connectors.unhealthy} compact
+                        severity={zpa.connectors.unhealthy > 0 ? 'critical' : undefined} />
+                      <MetricCard label="Outdated" value={zpa.connectors.outdated} compact
+                        severity={zpa.connectors.outdated > 0 ? 'high' : undefined} />
+                      <MetricCard label="Applications" value={zpa.applications.total} compact />
+                      <MetricCard label="Server Groups" value={zpa.serverGroups.total} compact />
+                      <MetricCard label="Access Policies" value={zpa.accessPolicies.total} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 2: Applications, Connector Groups, Server Groups */}
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Applications ({zpa.applications.total})</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Total" value={zpa.applications.total} compact />
+                      <MetricCard label="Enabled" value={zpa.applications.enabled} compact />
+                      <MetricCard label="Disabled" value={zpa.applications.disabled} compact
+                        severity={zpa.applications.disabled > 0 ? 'medium' : undefined} />
+                      <MetricCard label="Seg Groups" value={zpa.segmentGroups.total} compact />
+                    </div>
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Connector Groups</div>
+                    {Object.keys(zpa.connectors.byGroup).length > 0 ? (
+                      Object.entries(zpa.connectors.byGroup).map(([group, info]) => (
+                        <div class="stat-row" key={group}>
+                          <span class="stat-label">{group}</span>
+                          <span class="stat-value">{info.healthy}/{info.total}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p class="no-data">No connector groups</p>
+                    )}
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Server Groups</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Total" value={zpa.serverGroups.total} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Connector Table */}
+                  <div class="card card-compact col-12">
+                    <div class="card-title">Connectors</div>
+                    <table class="compact-table">
+                      <thead>
+                        <tr><th>Name</th><th>Group</th><th>Status</th><th>Version</th><th>Last Connected</th></tr>
+                      </thead>
+                      <tbody>
+                        {zpa.connectors.list.map((conn) => (
+                          <tr key={conn.id}>
+                            <td>{conn.name}</td>
+                            <td>{conn.connectorGroupName}</td>
+                            <td>
+                              <span class={`badge ${conn.runtimeStatus === 'ZPN_STATUS_AUTHENTICATED' ? 'badge-low' : conn.runtimeStatus === 'ZPN_STATUS_DISCONNECTED' ? 'badge-critical' : 'badge-medium'}`}>
+                                {conn.runtimeStatus === 'ZPN_STATUS_AUTHENTICATED' ? 'Connected' : conn.runtimeStatus === 'ZPN_STATUS_DISCONNECTED' ? 'Disconnected' : conn.runtimeStatus}
+                              </span>
+                            </td>
+                            <td>
+                              {conn.currentVersion || '-'}
+                              {conn.currentVersion && conn.expectedVersion && conn.currentVersion !== conn.expectedVersion && (
+                                <span class="badge badge-medium" style="margin-left: 4px; font-size: 0.5rem;">Update</span>
+                              )}
+                            </td>
+                            <td style="white-space: nowrap;">{conn.lastBrokerConnectTime ? new Date(conn.lastBrokerConnectTime).toLocaleDateString() : '-'}</td>
+                          </tr>
+                        ))}
+                        {zpa.connectors.list.length === 0 && (
+                          <tr><td colSpan={5}><p class="no-data">No connectors</p></td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">Zscaler not configured</p>
               </div>
             )}
           </div>

@@ -4,6 +4,7 @@ import { Dashboard } from '../views/Dashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
+import { ZscalerClient, type ZscalerFullSummary } from '../integrations/zscaler/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
 import { TrendService, type CrowdStrikeTrends, type SalesforceTrends } from '../services/trends';
 
@@ -27,6 +28,7 @@ uiRoutes.get('/', async (c) => {
   let crowdstrike = null;
   let salesforce: TicketMetrics | null = null;
   let microsoft: MicrosoftFullSummary | null = null;
+  let zscaler: ZscalerFullSummary | null = null;
   let dataSource: 'cache' | 'live' = 'live';
   let cachedAt: string | null = null;
   let csTrends: CrowdStrikeTrends | null = null;
@@ -156,6 +158,39 @@ uiRoutes.get('/', async (c) => {
     platforms.push({ platform: 'microsoft', status: 'not_configured', last_sync: null });
   }
 
+  // Zscaler: try cache first, then live API
+  const zsClient = new ZscalerClient(c.env);
+  if (zsClient.isConfigured()) {
+    const zsCacheKey = `${CACHE_KEYS.ZSCALER_SUMMARY}:${period}`;
+    fetchPromises.push((async () => {
+      if (!forceRefresh) {
+        const cached = await cache.get<ZscalerFullSummary>(zsCacheKey);
+        if (cached) {
+          zscaler = cached.data;
+          if (!cachedAt) cachedAt = cached.cachedAt;
+          platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: cached.cachedAt });
+          return;
+        }
+      }
+      try {
+        const result = await withTimeout(zsClient.getFullSummary(), 25000);
+        if (result) {
+          zscaler = result;
+          platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: new Date().toISOString() });
+          await cache.set(zsCacheKey, zscaler, CACHE_TTL.DASHBOARD_DATA);
+        } else {
+          console.error('Zscaler fetch timed out (25s)');
+          platforms.push({ platform: 'zscaler', status: 'error', last_sync: null, error_message: 'Request timeout' });
+        }
+      } catch (error) {
+        console.error('Zscaler fetch error:', error instanceof Error ? error.message : error);
+        platforms.push({ platform: 'zscaler', status: 'error', last_sync: null, error_message: 'Failed to connect' });
+      }
+    })());
+  } else {
+    platforms.push({ platform: 'zscaler', status: 'not_configured', last_sync: null });
+  }
+
   // Fetch trend data from D1 (fast, no external API calls)
   fetchPromises.push(
     trendService.getCrowdStrikeTrends(daysBack)
@@ -174,7 +209,6 @@ uiRoutes.get('/', async (c) => {
   // Add other platforms as not configured for now
   platforms.push(
     { platform: 'abnormal', status: 'not_configured', last_sync: null },
-    { platform: 'zscaler', status: 'not_configured', last_sync: null },
   );
 
   return c.html(
@@ -183,6 +217,7 @@ uiRoutes.get('/', async (c) => {
         crowdstrike,
         salesforce,
         microsoft,
+        zscaler,
         platforms,
         period,
         lastUpdated: new Date().toISOString(),
