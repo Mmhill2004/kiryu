@@ -38,6 +38,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 | **CrowdStrike** | ✅ Active | 12 available: Alerts, Hosts, Incidents, CrowdScore, Spotlight Vulns, ZTA, Identity Protection, Discover, Sensor Usage, Intel (Actors/Indicators/Reports). NGSIEM + OverWatch: 404 (not provisioned). Prevention Policies: 403 (no scope). |
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
 | **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
+| **Meraki** | ✅ Active | Network infrastructure: Device statuses, VPN tunnels, Uplinks, Licensing. Static API key auth (no OAuth). |
 | **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
 | **Zscaler** | ⚪ Stubbed | Client ready, needs credentials |
 | **Cloudflare** | ⚪ Stubbed | Access/Gateway logs, needs API token |
@@ -68,6 +69,9 @@ wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0001_i
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0002_salesforce_tickets.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0003_metrics_and_retention.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0004_expanded_cs_metrics.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0005_zscaler_metrics.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0006_zdx_analytics_metrics.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0007_meraki_metrics.sql --remote
 
 # Add secrets
 wrangler secret put SECRET_NAME --name security-dashboard-api
@@ -95,6 +99,7 @@ kiryu/
 │   │   ├── crowdstrike/client.ts  # Full: 12 modules (see Key Files below)
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
 │   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations, Risky Users, Incidents, Machines
+│   │   ├── meraki/client.ts       # Full: Device statuses, VPN tunnels, Uplinks, Licensing
 │   │   ├── abnormal/client.ts     # Stubbed
 │   │   ├── zscaler/client.ts      # Stubbed
 │   │   └── cloudflare/client.ts   # Stubbed
@@ -105,7 +110,7 @@ kiryu/
 │   │   └── report.ts         # Monthly report generation + R2 storage
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
-├── packages/db/migrations/   # D1 SQL migrations (4 files)
+├── packages/db/migrations/   # D1 SQL migrations (7 files)
 └── mcp-servers/security-dashboard/  # MCP server (28 tools)
 ```
 
@@ -117,6 +122,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
 - **Microsoft** — 8 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
+- **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
@@ -125,7 +131,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine.
 
 ### Views
-- **Dashboard.tsx** — Main dashboard. Renders CS/SF/MS sections with MetricCards (source labels, trend indicators). Security Score calculated from CS + MS alert severity weights.
+- **Dashboard.tsx** — Main dashboard with tabs: CrowdStrike, Microsoft, Salesforce, ZIA, ZPA, ZDX, Meraki. MetricCards with source labels and trend indicators. Security Score calculated from CS + MS alert severity weights.
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
 - **Layout.tsx** — Base HTML shell with all CSS.
 
@@ -139,6 +145,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 - `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
 - `GET /api/integrations/microsoft/{summary,alerts,defender/alerts,secure-score,recommendations,compliance}` — Microsoft (identity/incidents/machines only via `/summary`)
 - `GET /api/integrations/salesforce/{metrics,tickets,open,mttr,workload}` — Salesforce
+- `GET /api/integrations/meraki/{test,summary,devices,networks,vpn,uplinks}` — Meraki
 - `GET /api/reports`, `GET /api/reports/latest`, `GET /api/reports/:yearMonth`, `POST /api/reports/generate` — Reports
 - `POST /api/v1/sync/{all,:platform}`, `GET /api/v1/sync/{status,history}` — Sync (API key required)
 
@@ -160,6 +167,8 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 - `audit_logs` - Audit trail
 - `ticket_metrics_daily` - Daily Salesforce ticket KPIs
 - `crowdstrike_metrics_daily` - Daily CrowdStrike snapshots (~68 columns across 12 modules)
+- `zscaler_metrics_daily` - Daily Zscaler snapshots (ZIA, ZPA, ZDX, Analytics, Risk360)
+- `meraki_metrics_daily` - Daily Meraki snapshots (devices, networks, VPN, uplinks, licensing)
 - `data_retention_log` - Tracks automated cleanup runs (90-day retention)
 
 ## Environment Variables
@@ -191,6 +200,9 @@ AZURE_SUBSCRIPTION_ID        # Scope Cloud Defender recommendations to a subscri
 ABNORMAL_API_TOKEN
 ZSCALER_API_KEY
 ZSCALER_API_SECRET
+MERAKI_API_KEY               # Meraki Dashboard API key
+MERAKI_ORG_ID                # Meraki Organization ID
+MERAKI_BASE_URL              # Region override (default: https://api.meraki.com/api/v1)
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
@@ -211,7 +223,8 @@ Key type patterns:
 - `ContentfulStatusCode` (from `hono/utils/http-status`) for `ApiError.statusCode` — Hono's `c.json()` rejects 1xx codes
 - `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
 - Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
-- Stubbed integration credentials (`ABNORMAL_API_TOKEN`, `ZSCALER_API_KEY`, `ZSCALER_API_SECRET`) are typed as required `string` in `Env` but are never set — clients guard with `isConfigured()` at runtime
+- Stubbed integration credentials (`ABNORMAL_API_TOKEN`) are typed as required `string` in `Env` but are never set — clients guard with `isConfigured()` at runtime
+- Meraki/Zscaler/Cloudflare credentials are typed as optional `string?` in `Env` — clients check with `isConfigured()`
 
 ## Performance & Stability
 
@@ -256,6 +269,7 @@ await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
 <MetricCard label="Active Alerts" value={12} source="CS" />  // CrowdStrike
 <MetricCard label="Open Tickets" value={42} source="SF" />   // Salesforce
 <MetricCard label="Secure Score" value="78%" source="MS" />  // Microsoft
+<MetricCard label="Devices Online" value="42/50" source="MK" />  // Meraki
 ```
 
 ### Integration Client Pattern
@@ -326,6 +340,15 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### Testing production endpoints via curl
 -> Use `cloudflared access token -app="https://security-dashboard-api.rodgersbuilders.workers.dev"` to get a CF Access JWT, then pass it as: `curl -H "cookie: CF_Authorization=$TOKEN" https://security-dashboard-api.rodgersbuilders.workers.dev/api/...`
+
+### Meraki 429 rate limited
+-> Meraki allows 10 req/sec per-org, shared across ALL API consumers. The client uses org-level endpoints to minimize calls. If rate-limited, the `Retry-After` header indicates wait time (1–10 min). Cache aggressively — the 5-min KV TTL should keep requests well under budget.
+
+### Meraki 302/307 redirects
+-> Meraki routes requests to regional shards via redirects. The client uses `redirect: 'follow'` in fetch. If you see redirect-related errors, ensure the runtime supports automatic redirect following.
+
+### Meraki returns empty device list
+-> Ensure `MERAKI_ORG_ID` is set correctly. Use `/api/integrations/meraki/test` to verify connectivity — it lists all organizations the API key can access. The org ID is the numeric string shown in that response.
 
 ### Deploy fails with "No project was selected"
 -> Run from `apps/worker/` directory: `npx wrangler deploy src/index.ts` (not `pnpm deploy` from root)
