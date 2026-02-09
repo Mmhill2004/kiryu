@@ -6,7 +6,7 @@ import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
 import { ZscalerClient, type ZscalerFullSummary } from '../integrations/zscaler/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
-import { TrendService, type CrowdStrikeTrends, type SalesforceTrends } from '../services/trends';
+import { TrendService, type CrowdStrikeTrends, type SalesforceTrends, type ZscalerTrends } from '../services/trends';
 
 export const uiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -33,6 +33,7 @@ uiRoutes.get('/', async (c) => {
   let cachedAt: string | null = null;
   let csTrends: CrowdStrikeTrends | null = null;
   let sfTrends: SalesforceTrends | null = null;
+  let zsTrends: ZscalerTrends | null = null;
   let platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -202,6 +203,11 @@ uiRoutes.get('/', async (c) => {
       .then(data => { sfTrends = data; })
       .catch(err => console.error('SF trend fetch error:', err))
   );
+  fetchPromises.push(
+    trendService.getZscalerTrends(daysBack)
+      .then(data => { zsTrends = data; })
+      .catch(err => console.error('ZS trend fetch error:', err))
+  );
 
   // Wait for all fetches to complete (individual timeouts above prevent indefinite hang)
   await Promise.all(fetchPromises);
@@ -225,6 +231,7 @@ uiRoutes.get('/', async (c) => {
         cachedAt,
         csTrends,
         sfTrends,
+        zsTrends,
       }}
     />
   );

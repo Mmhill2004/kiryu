@@ -32,6 +32,9 @@ export interface ZscalerTrends {
   risk360Overall: TrendData;
   ziaUrlFilterRulesEnabled: TrendData;
   zpaAppsTotal: TrendData;
+  zdxAvgScore: TrendData;
+  zdxActiveAlerts: TrendData;
+  analyticsTrafficBlocked: TrendData;
 }
 
 export class TrendService {
@@ -116,7 +119,8 @@ export class TrendService {
       const totalDays = periodDays * 2;
       const rows = await this.env.DB.prepare(`
         SELECT date, zpa_connectors_healthy, risk360_overall,
-               zia_url_filter_rules_enabled, zpa_apps_total
+               zia_url_filter_rules_enabled, zpa_apps_total,
+               zdx_avg_score, zdx_active_alerts, analytics_traffic_blocked
         FROM zscaler_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
@@ -138,6 +142,9 @@ export class TrendService {
         risk360Overall: this.buildTrend(current, previous, 'risk360_overall'),
         ziaUrlFilterRulesEnabled: this.buildTrend(current, previous, 'zia_url_filter_rules_enabled'),
         zpaAppsTotal: this.buildTrend(current, previous, 'zpa_apps_total'),
+        zdxAvgScore: this.buildTrend(current, previous, 'zdx_avg_score'),
+        zdxActiveAlerts: this.buildTrend(current, previous, 'zdx_active_alerts'),
+        analyticsTrafficBlocked: this.buildTrend(current, previous, 'analytics_traffic_blocked'),
       };
     } catch (error) {
       console.error('Error fetching Zscaler trends:', error);

@@ -329,9 +329,15 @@ export class SyncService {
           zia_activation_pending, zia_admin_changes_24h,
           risk360_overall, risk360_external_attack_surface,
           risk360_compromise, risk360_lateral_propagation, risk360_data_loss,
+          zdx_avg_score, zdx_score_category, zdx_apps_monitored,
+          zdx_lowest_app_score, zdx_total_devices, zdx_active_alerts, zdx_critical_alerts,
+          analytics_traffic_allowed, analytics_traffic_blocked, analytics_threats_total,
+          zia_custom_url_categories, zia_sandbox_enabled, zia_bandwidth_rules,
+          zpa_connector_groups, zpa_apps_double_encrypt,
           metadata, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
         )
       `).bind(
         today,
@@ -363,6 +369,25 @@ export class SyncService {
         summary.risk360?.compromise ?? null,
         summary.risk360?.lateralPropagation ?? null,
         summary.risk360?.dataLoss ?? null,
+        // ZDX columns
+        summary.zdx?.averageScore ?? null,
+        summary.zdx?.scoreCategory ?? null,
+        summary.zdx?.apps.length ?? 0,
+        summary.zdx?.lowestScoringApp?.score ?? null,
+        summary.zdx?.totalDevices ?? 0,
+        summary.zdx?.alerts.activeAlerts ?? 0,
+        summary.zdx?.alerts.criticalAlerts ?? 0,
+        // Analytics columns
+        summary.analytics?.traffic.allowed ?? 0,
+        summary.analytics?.traffic.blocked ?? 0,
+        summary.analytics?.threats.total ?? 0,
+        // Enhanced ZIA columns
+        summary.zia?.customUrlCategories ?? 0,
+        summary.zia?.sandboxEnabled ? 1 : 0,
+        summary.zia?.bandwidthControlRules ?? 0,
+        // Enhanced ZPA columns
+        summary.zpa?.connectorGroups.total ?? 0,
+        summary.zpa?.applications.doubleEncryptEnabled ?? 0,
         JSON.stringify({ errors: summary.errors })
       ).run();
       recordsSynced++;
@@ -373,9 +398,12 @@ export class SyncService {
     await this.updatePlatformStatus('zscaler', 'healthy', {
       zia_configured: client.isZiaConfigured(),
       zpa_configured: client.isZpaConfigured(),
+      zdx_configured: client.isZdxConfigured(),
+      analytics_configured: client.isAnalyticsConfigured(),
       zpa_connectors_total: summary.zpa?.connectors.total ?? 0,
       zpa_connectors_healthy: summary.zpa?.connectors.healthy ?? 0,
       zia_protections: summary.zia?.securityPolicy.protectionCount ?? 0,
+      zdx_score: summary.zdx?.averageScore ?? null,
       errors: summary.errors,
     });
 

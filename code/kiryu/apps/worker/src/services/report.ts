@@ -53,12 +53,25 @@ export interface ReportData {
     zpaConnectorsUnhealthy: number;
     zpaConnectorsOutdated: number;
     zpaAppsTotal: number;
+    zpaConnectorGroups: number;
+    zpaDoubleEncryptApps: number;
     ziaProtectionsEnabled: number;
     ziaSslInspectionEnabled: boolean;
     ziaActivationPending: boolean;
     ziaUrlFilterRules: number;
     ziaFirewallRules: number;
     ziaDlpRules: number;
+    ziaCustomUrlCategories: number;
+    ziaSandboxEnabled: boolean;
+    ziaBandwidthRules: number;
+    zdxAvgScore: number | null;
+    zdxScoreCategory: string | null;
+    zdxAppsMonitored: number;
+    zdxTotalDevices: number;
+    zdxActiveAlerts: number;
+    analyticsTrafficAllowed: number;
+    analyticsTrafficBlocked: number;
+    analyticsThreatsTotal: number;
     unhealthyConnectorNames: string[];
   } | null;
   platforms: Array<{ name: string; status: string; lastSync: string | null }>;
@@ -313,12 +326,25 @@ export class ReportService {
         zpaConnectorsUnhealthy: zs.zpa_connectors_unhealthy ?? 0,
         zpaConnectorsOutdated: zs.zpa_connectors_outdated ?? 0,
         zpaAppsTotal: zs.zpa_apps_total ?? 0,
+        zpaConnectorGroups: zs.zpa_connector_groups ?? 0,
+        zpaDoubleEncryptApps: zs.zpa_apps_double_encrypt ?? 0,
         ziaProtectionsEnabled: zs.zia_atp_protections_enabled ?? 0,
         ziaSslInspectionEnabled: !!(zs.zia_ssl_inspection_enabled),
         ziaActivationPending: !!(zs.zia_activation_pending),
         ziaUrlFilterRules: zs.zia_url_filter_rules_enabled ?? 0,
         ziaFirewallRules: zs.zia_firewall_rules_enabled ?? 0,
         ziaDlpRules: zs.zia_dlp_rules_total ?? 0,
+        ziaCustomUrlCategories: zs.zia_custom_url_categories ?? 0,
+        ziaSandboxEnabled: !!(zs.zia_sandbox_enabled),
+        ziaBandwidthRules: zs.zia_bandwidth_rules ?? 0,
+        zdxAvgScore: zs.zdx_avg_score ?? null,
+        zdxScoreCategory: zs.zdx_score_category ?? null,
+        zdxAppsMonitored: zs.zdx_apps_monitored ?? 0,
+        zdxTotalDevices: zs.zdx_total_devices ?? 0,
+        zdxActiveAlerts: zs.zdx_active_alerts ?? 0,
+        analyticsTrafficAllowed: zs.analytics_traffic_allowed ?? 0,
+        analyticsTrafficBlocked: zs.analytics_traffic_blocked ?? 0,
+        analyticsThreatsTotal: zs.analytics_threats_total ?? 0,
         unhealthyConnectorNames: [],
       };
     }
@@ -378,6 +404,15 @@ export class ReportService {
       }
       if (data.zscaler.zpaConnectorsOutdated > 0) {
         recs.push(`${data.zscaler.zpaConnectorsOutdated} ZPA connector(s) are running outdated software. Update to the latest version for security patches and improvements.`);
+      }
+      if (data.zscaler.zdxAvgScore !== null && data.zscaler.zdxAvgScore < 66 && data.zscaler.zdxAvgScore >= 0) {
+        recs.push(`ZDX average score is ${data.zscaler.zdxAvgScore.toFixed(0)} (${data.zscaler.zdxScoreCategory}). Investigate degraded application performance affecting user digital experience.`);
+      }
+      if (data.zscaler.zdxActiveAlerts > 0) {
+        recs.push(`${data.zscaler.zdxActiveAlerts} active ZDX alert(s) indicate performance degradation. Review impacted applications and network paths.`);
+      }
+      if (!data.zscaler.ziaSandboxEnabled) {
+        recs.push('ZIA Cloud Sandbox is disabled. Enable it for advanced threat detection on unknown files.');
       }
     }
 

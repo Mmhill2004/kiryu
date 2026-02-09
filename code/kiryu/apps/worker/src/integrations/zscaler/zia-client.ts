@@ -35,6 +35,9 @@ export interface ZIASummary {
   };
   activationPending: boolean;
   recentAdminChanges: number;
+  customUrlCategories: number;
+  sandboxEnabled: boolean;
+  bandwidthControlRules: number;
   fetchedAt: string;
 }
 
@@ -212,6 +215,36 @@ export class ZIAClient {
     }
   }
 
+  async getCustomUrlCategories(): Promise<number> {
+    try {
+      const cats = await this.auth.ziaFetch<unknown[]>('/api/v1/urlCategories?customOnly=true');
+      return Array.isArray(cats) ? cats.length : 0;
+    } catch (error) {
+      console.error('ZIA getCustomUrlCategories error:', error);
+      return 0;
+    }
+  }
+
+  async getSandboxStatus(): Promise<boolean> {
+    try {
+      const data = await this.auth.ziaFetch<Record<string, unknown>>('/api/v1/sandboxSettings');
+      return !!(data && (data.enabled || data.status === 'ENABLED' || data.fileUploadEnabled));
+    } catch (error) {
+      console.error('ZIA getSandboxStatus error:', error);
+      return false;
+    }
+  }
+
+  async getBandwidthControlRules(): Promise<number> {
+    try {
+      const rules = await this.auth.ziaFetch<unknown[]>('/api/v1/bandwidthControlRules');
+      return Array.isArray(rules) ? rules.length : 0;
+    } catch (error) {
+      console.error('ZIA getBandwidthControlRules error:', error);
+      return 0;
+    }
+  }
+
   async getSummary(): Promise<ZIASummary> {
     const [
       securityPolicy,
@@ -223,6 +256,9 @@ export class ZIAClient {
       sslEnabled,
       activationPending,
       adminChanges,
+      customUrlCats,
+      sandboxEnabled,
+      bwRules,
     ] = await Promise.allSettled([
       this.getSecurityPolicy(),
       this.getUrlFilteringRules(),
@@ -233,6 +269,9 @@ export class ZIAClient {
       this.getSslInspectionStatus(),
       this.getActivationStatus(),
       this.getRecentAdminChanges(),
+      this.getCustomUrlCategories(),
+      this.getSandboxStatus(),
+      this.getBandwidthControlRules(),
     ]);
 
     return {
@@ -250,6 +289,9 @@ export class ZIAClient {
       sslInspection: { enabled: sslEnabled.status === 'fulfilled' ? sslEnabled.value : false },
       activationPending: activationPending.status === 'fulfilled' ? activationPending.value : false,
       recentAdminChanges: adminChanges.status === 'fulfilled' ? adminChanges.value : 0,
+      customUrlCategories: customUrlCats.status === 'fulfilled' ? customUrlCats.value : 0,
+      sandboxEnabled: sandboxEnabled.status === 'fulfilled' ? sandboxEnabled.value : false,
+      bandwidthControlRules: bwRules.status === 'fulfilled' ? bwRules.value : 0,
       fetchedAt: new Date().toISOString(),
     };
   }

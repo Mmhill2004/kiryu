@@ -109,6 +109,7 @@ export class ZscalerAuth {
           grant_type: 'client_credentials',
           client_id: this.env.ZSCALER_CLIENT_ID!,
           client_secret: this.env.ZSCALER_CLIENT_SECRET!,
+          audience: 'https://api.zscaler.com',
         }).toString(),
         signal: controller.signal,
       });
@@ -318,6 +319,96 @@ export class ZscalerAuth {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  isZdxConfigured(): boolean {
+    return this.isOneApiConfigured() || !!(this.env.ZDX_API_KEY_ID && this.env.ZDX_API_SECRET);
+  }
+
+  getZdxBaseUrl(): string {
+    const cloud = this.env.ZDX_CLOUD || 'zdxcloud';
+    return `https://api.${cloud}.net/v1`;
+  }
+
+  async zdxFetch<T>(endpoint: string): Promise<T> {
+    const baseUrl = this.getZdxBaseUrl();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+
+    try {
+      let token: string;
+      if (this.isOneApiConfigured()) {
+        token = await this.getOneApiToken();
+      } else {
+        token = await this.getZdxToken();
+      }
+
+      const resp = await fetch(`${baseUrl}${endpoint}`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`ZDX ${endpoint} failed (${resp.status}): ${text.slice(0, 200)}`);
+      }
+
+      return resp.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  // --- Dedicated ZDX Token (fallback when OneAPI unavailable) ---
+
+  async getZdxToken(): Promise<string> {
+    const cached = await this.kv.get('zdx:oauth:token');
+    if (cached) return cached;
+
+    if (this.pendingZdxToken) return this.pendingZdxToken;
+    this.pendingZdxToken = this.fetchZdxToken();
+    try {
+      return await this.pendingZdxToken;
+    } finally {
+      this.pendingZdxToken = null;
+    }
+  }
+
+  private pendingZdxToken: Promise<string> | null = null;
+
+  private async fetchZdxToken(): Promise<string> {
+    const baseUrl = this.getZdxBaseUrl();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), OAUTH_TIMEOUT);
+
+    try {
+      const resp = await fetch(`${baseUrl}/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key_id: this.env.ZDX_API_KEY_ID!,
+          key_secret: this.env.ZDX_API_SECRET!,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`ZDX OAuth failed (${resp.status}): ${text}`);
+      }
+
+      const data = await resp.json() as { token: string; expiresIn?: number };
+      await this.kv.put('zdx:oauth:token', data.token, { expirationTtl: 3300 });
+      return data.token;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  getAnalyticsBaseUrl(): string {
+    const cloud = this.env.ZSCALER_CLOUD || 'zscaler';
+    return `https://api.${cloud}.zsapi.net/analytics/v1/graphql`;
   }
 }
 

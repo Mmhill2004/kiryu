@@ -7,7 +7,7 @@ import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, 
 import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
 import type { ZscalerFullSummary } from '../integrations/zscaler/client';
-import type { CrowdStrikeTrends, SalesforceTrends } from '../services/trends';
+import type { CrowdStrikeTrends, SalesforceTrends, ZscalerTrends } from '../services/trends';
 
 interface DashboardData {
   crowdstrike: {
@@ -39,6 +39,7 @@ interface DashboardData {
   cachedAt: string | null;
   csTrends: CrowdStrikeTrends | null;
   sfTrends: SalesforceTrends | null;
+  zsTrends: ZscalerTrends | null;
 }
 
 interface Props {
@@ -124,7 +125,7 @@ function calculateCompositeScore(
 }
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, microsoft, zscaler, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends } = data;
+  const { crowdstrike, salesforce, microsoft, zscaler, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends, zsTrends } = data;
 
   const securityScore = calculateCompositeScore(crowdstrike, microsoft);
 
@@ -269,6 +270,16 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <div class="kpi-source">MS</div>
                   </div>
                 )}
+
+                {zscaler?.zdx && zscaler.zdx.averageScore >= 0 && (
+                  <div class="kpi-item">
+                    <div class={`kpi-value ${zscaler.zdx.averageScore < 34 ? 'severity-critical' : zscaler.zdx.averageScore < 66 ? 'severity-medium' : ''}`}>
+                      {zscaler.zdx.averageScore}
+                    </div>
+                    <div class="kpi-label">ZDX Score</div>
+                    <div class="kpi-source">ZS</div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -294,6 +305,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
             <button class="tab-btn" data-tab="salesforce">Salesforce</button>
             <button class="tab-btn" data-tab="zia">ZIA</button>
             <button class="tab-btn" data-tab="zpa">ZPA</button>
+            <button class="tab-btn" data-tab="zdx">ZDX</button>
           </div>
 
           {/* ═══ CROWDSTRIKE TAB ═══ */}
@@ -770,7 +782,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       <MetricCard label="Total" value={zia.urlFiltering.totalRules} compact />
                       <MetricCard label="Enabled" value={zia.urlFiltering.enabledRules} compact />
                       <MetricCard label="Block" value={zia.urlFiltering.byAction['BLOCK'] ?? 0} compact severity={((zia.urlFiltering.byAction['BLOCK'] ?? 0) > 0) ? 'high' : undefined} />
-                      <MetricCard label="Caution" value={zia.urlFiltering.byAction['CAUTION'] ?? 0} compact severity={((zia.urlFiltering.byAction['CAUTION'] ?? 0) > 0) ? 'medium' : undefined} />
+                      <MetricCard label="Custom Cats" value={zia.customUrlCategories} compact />
                     </div>
                   </div>
 
@@ -781,18 +793,42 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       <MetricCard label="Enabled" value={zia.firewall.enabledRules} compact />
                       <MetricCard label="Disabled" value={zia.firewall.disabledRules} compact
                         severity={zia.firewall.disabledRules > 0 ? 'medium' : undefined} />
+                      <MetricCard label="BW Rules" value={zia.bandwidthControlRules} compact />
                     </div>
                   </div>
 
                   <div class="card card-compact col-4">
-                    <div class="card-title">DLP</div>
+                    <div class="card-title">DLP &amp; Sandbox</div>
                     <div class="mini-metric-grid">
-                      <MetricCard label="Total Rules" value={zia.dlp.totalRules} compact />
+                      <MetricCard label="DLP Rules" value={zia.dlp.totalRules} compact />
                       <MetricCard label="Dictionaries" value={zia.dlp.totalDictionaries} compact />
+                      <MetricCard label="Sandbox" value={zia.sandboxEnabled ? 'Enabled' : 'Disabled'} compact
+                        severity={!zia.sandboxEnabled ? 'medium' : undefined} />
                     </div>
                   </div>
 
-                  {/* Row 3: Protection Status */}
+                  {/* Row 3: Analytics (if available) */}
+                  {zscaler?.analytics && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">Traffic Analytics (24h)</div>
+                      <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                        <MetricCard label="Allowed" value={zscaler.analytics.traffic.allowed.toLocaleString()} compact />
+                        <MetricCard label="Blocked" value={zscaler.analytics.traffic.blocked.toLocaleString()} compact severity={zscaler.analytics.traffic.blocked > 0 ? 'high' : undefined} />
+                        <MetricCard label="Cautioned" value={zscaler.analytics.traffic.cautioned.toLocaleString()} compact severity={zscaler.analytics.traffic.cautioned > 0 ? 'medium' : undefined} />
+                        <MetricCard label="Threats" value={zscaler.analytics.threats.total.toLocaleString()} compact severity={zscaler.analytics.threats.total > 0 ? 'critical' : undefined} />
+                        <MetricCard label="Bandwidth" value={`${(zscaler.analytics.traffic.totalBandwidth / (1024 * 1024 * 1024)).toFixed(1)} GB`} compact />
+                      </div>
+                      {zscaler.analytics.threats.categories.length > 0 && (
+                        <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
+                          {zscaler.analytics.threats.categories.slice(0, 5).map((t) => (
+                            <span key={t.category} class="badge badge-critical">{t.category}: {t.count}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Row 4: Protection Status */}
                   <div class="card card-compact col-12">
                     <div class="card-title">Protection Status</div>
                     <div style="display: flex; gap: 4px; flex-wrap: wrap;">
@@ -845,12 +881,18 @@ export const Dashboard: FC<Props> = ({ data }) => {
                       <MetricCard label="Enabled" value={zpa.applications.enabled} compact />
                       <MetricCard label="Disabled" value={zpa.applications.disabled} compact
                         severity={zpa.applications.disabled > 0 ? 'medium' : undefined} />
-                      <MetricCard label="Seg Groups" value={zpa.segmentGroups.total} compact />
+                      <MetricCard label="Dbl Encrypt" value={zpa.applications.doubleEncryptEnabled} compact />
+                    </div>
+                    <div style="margin-top: var(--sp-2);">
+                      <div class="stat-row">
+                        <span class="stat-label">Segment Groups</span>
+                        <span class="stat-value">{zpa.segmentGroups.total}</span>
+                      </div>
                     </div>
                   </div>
 
                   <div class="card card-compact col-4">
-                    <div class="card-title">Connector Groups</div>
+                    <div class="card-title">Connector Groups ({zpa.connectorGroups.total})</div>
                     {Object.keys(zpa.connectors.byGroup).length > 0 ? (
                       Object.entries(zpa.connectors.byGroup).map(([group, info]) => (
                         <div class="stat-row" key={group}>
@@ -867,6 +909,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     <div class="card-title">Server Groups</div>
                     <div class="mini-metric-grid">
                       <MetricCard label="Total" value={zpa.serverGroups.total} compact />
+                      <MetricCard label="Policies" value={zpa.accessPolicies.total} compact />
                     </div>
                   </div>
 
@@ -907,6 +950,104 @@ export const Dashboard: FC<Props> = ({ data }) => {
             })() : (
               <div class="col-12">
                 <p class="no-data">Zscaler not configured</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ ZDX TAB ═══ */}
+          <div id="tab-zdx" class="tab-content">
+            {zscaler?.zdx ? (() => {
+              const zdx = zscaler.zdx;
+              return (
+                <>
+                  {/* Row 1: Key Metrics */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                      <MetricCard label="Avg Score" value={zdx.averageScore >= 0 ? zdx.averageScore : 'N/A'} source="ZS" compact
+                        severity={zdx.averageScore < 34 && zdx.averageScore >= 0 ? 'critical' : zdx.averageScore < 66 && zdx.averageScore >= 0 ? 'medium' : undefined}
+                        trend={zsTrends?.zdxAvgScore ? { ...zsTrends.zdxAvgScore, invertColor: true } : undefined} />
+                      <MetricCard label="Category" value={zdx.scoreCategory} compact />
+                      <MetricCard label="Apps Monitored" value={zdx.apps.length} compact />
+                      <MetricCard label="Devices" value={zdx.totalDevices} compact />
+                      <MetricCard label="Active Alerts" value={zdx.alerts.activeAlerts} compact
+                        severity={zdx.alerts.activeAlerts > 0 ? 'high' : undefined}
+                        trend={zsTrends?.zdxActiveAlerts ? zsTrends.zdxActiveAlerts : undefined} />
+                      <MetricCard label="Critical Alerts" value={zdx.alerts.criticalAlerts} compact
+                        severity={zdx.alerts.criticalAlerts > 0 ? 'critical' : undefined} />
+                    </div>
+                  </div>
+
+                  {/* Row 2: Lowest Scoring App + App Table */}
+                  {zdx.lowestScoringApp && (
+                    <div class="card card-compact col-4">
+                      <div class="card-title">Lowest Scoring App</div>
+                      <div class="mini-metric-grid">
+                        <MetricCard label="App" value={zdx.lowestScoringApp.name} compact />
+                        <MetricCard label="Score" value={zdx.lowestScoringApp.score} compact
+                          severity={zdx.lowestScoringApp.score < 34 ? 'critical' : zdx.lowestScoringApp.score < 66 ? 'medium' : undefined} />
+                        <MetricCard label="Region" value={zdx.lowestScoringApp.mostImpactedRegion || 'N/A'} compact />
+                        <MetricCard label="Users" value={zdx.lowestScoringApp.totalUsers} compact />
+                      </div>
+                    </div>
+                  )}
+
+                  <div class={`card card-compact ${zdx.lowestScoringApp ? 'col-8' : 'col-12'}`}>
+                    <div class="card-title">App Performance</div>
+                    <table class="compact-table">
+                      <thead>
+                        <tr><th>App</th><th>Score</th><th>Region</th><th>Users</th></tr>
+                      </thead>
+                      <tbody>
+                        {[...zdx.apps].sort((a, b) => a.score - b.score).slice(0, 8).map((app) => (
+                          <tr key={app.id}>
+                            <td>{app.name}</td>
+                            <td>
+                              <span class={`badge ${app.score < 34 ? 'badge-critical' : app.score < 66 ? 'badge-medium' : 'badge-low'}`}>
+                                {app.score >= 0 ? app.score : 'N/A'}
+                              </span>
+                            </td>
+                            <td>{app.mostImpactedRegion || '-'}</td>
+                            <td>{app.totalUsers}</td>
+                          </tr>
+                        ))}
+                        {zdx.apps.length === 0 && (
+                          <tr><td colSpan={4}><p class="no-data">No monitored apps</p></td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Row 3: Alerts */}
+                  {zdx.alerts.alerts.length > 0 && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">ZDX Alerts</div>
+                      <table class="compact-table">
+                        <thead>
+                          <tr><th>Severity</th><th>Rule</th><th>App</th><th>Devices</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                          {zdx.alerts.alerts.slice(0, 8).map((alert) => (
+                            <tr key={alert.id}>
+                              <td>
+                                <span class={`badge ${alert.severity.toLowerCase() === 'critical' ? 'badge-critical' : alert.severity.toLowerCase() === 'warning' ? 'badge-medium' : 'badge-info'}`}>
+                                  {alert.severity}
+                                </span>
+                              </td>
+                              <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{alert.ruleName}</td>
+                              <td>{alert.impactedApp}</td>
+                              <td>{alert.numDevices}</td>
+                              <td>{alert.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">ZDX not configured or no data available</p>
               </div>
             )}
           </div>

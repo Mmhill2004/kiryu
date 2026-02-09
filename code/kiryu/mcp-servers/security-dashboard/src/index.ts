@@ -384,6 +384,69 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "get_zscaler_summary",
+    description:
+      "Get the full Zscaler security summary including ZIA policy posture, ZPA connector health, ZDX digital experience scores, Analytics traffic data, and Risk360 scores — all in one call.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_zia",
+    description:
+      "Get Zscaler Internet Access (ZIA) policy posture including ATP protections, SSL inspection, URL filtering rules, firewall rules, DLP rules, sandbox status, custom URL categories, and bandwidth control rules.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_zpa",
+    description:
+      "Get Zscaler Private Access (ZPA) summary including connector health, connector groups, applications (with double encryption count), server groups, segment groups, and access policies.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_zdx",
+    description:
+      "Get Zscaler Digital Experience (ZDX) summary including average performance score, score category, monitored apps with individual scores, device count, and active/critical alerts.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_analytics",
+    description:
+      "Get Zscaler Analytics traffic summary from the GraphQL API. Returns traffic action counts (allowed/blocked/cautioned), protocol breakdown, and threat category data.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_risk360",
+    description:
+      "Get Zscaler Risk360 scores including overall score and sub-scores for external attack surface, compromise, lateral propagation, and data loss. Scores are manually submitted via the dashboard.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_zscaler_diagnostic",
+    description:
+      "Test all Zscaler API modules and report which are configured and accessible. Returns auth status for OneAPI, legacy ZIA, legacy ZPA, ZDX, and Analytics. Use this to troubleshoot connectivity.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
 ];
 
 // Tool handlers
@@ -522,6 +585,34 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_crowdstrike_diagnostic": {
       return apiRequest("/api/integrations/crowdstrike/diagnostic");
+    }
+
+    case "get_zscaler_summary": {
+      return apiRequest("/api/integrations/zscaler/summary");
+    }
+
+    case "get_zscaler_zia": {
+      return apiRequest("/api/integrations/zscaler/zia");
+    }
+
+    case "get_zscaler_zpa": {
+      return apiRequest("/api/integrations/zscaler/zpa");
+    }
+
+    case "get_zscaler_zdx": {
+      return apiRequest("/api/integrations/zscaler/zdx");
+    }
+
+    case "get_zscaler_analytics": {
+      return apiRequest("/api/integrations/zscaler/analytics");
+    }
+
+    case "get_zscaler_risk360": {
+      return apiRequest("/api/integrations/zscaler/risk360");
+    }
+
+    case "get_zscaler_diagnostic": {
+      return apiRequest("/api/integrations/zscaler/diagnostic");
     }
 
     default:

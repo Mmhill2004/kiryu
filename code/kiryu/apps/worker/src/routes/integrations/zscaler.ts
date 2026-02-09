@@ -238,6 +238,101 @@ zscalerRoutes.post('/risk360', async (c) => {
 });
 
 // ============================================
+// ZDX ENDPOINTS
+// ============================================
+
+/**
+ * Get ZDX (Zscaler Digital Experience) summary
+ */
+zscalerRoutes.get('/zdx', async (c) => {
+  const client = new ZscalerClient(c.env);
+
+  if (!client.isZdxConfigured()) {
+    return c.json({ error: 'ZDX not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getZdxSummary();
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch ZDX data',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get ZDX app scores
+ */
+zscalerRoutes.get('/zdx/apps', async (c) => {
+  const client = new ZscalerClient(c.env);
+
+  if (!client.isZdxConfigured()) {
+    return c.json({ error: 'ZDX not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getZdxSummary();
+    return c.json({ apps: summary.apps, averageScore: summary.averageScore, scoreCategory: summary.scoreCategory });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch ZDX apps',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+/**
+ * Get ZDX active alerts
+ */
+zscalerRoutes.get('/zdx/alerts', async (c) => {
+  const client = new ZscalerClient(c.env);
+
+  if (!client.isZdxConfigured()) {
+    return c.json({ error: 'ZDX not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getZdxSummary();
+    return c.json(summary.alerts);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch ZDX alerts',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
+// ANALYTICS ENDPOINT
+// ============================================
+
+/**
+ * Get Analytics traffic summary (GraphQL)
+ */
+zscalerRoutes.get('/analytics', async (c) => {
+  const client = new ZscalerClient(c.env);
+
+  if (!client.isAnalyticsConfigured()) {
+    return c.json({ error: 'Analytics not configured (requires OneAPI)' }, 503);
+  }
+
+  try {
+    const summary = await client.getAnalyticsSummary();
+    if (!summary) {
+      return c.json({ error: 'Analytics endpoint not accessible or returned no data' }, 404);
+    }
+    return c.json(summary);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch analytics data',
+      message: 'An internal error occurred',
+    }, 500);
+  }
+});
+
+// ============================================
 // DIAGNOSTIC ENDPOINT
 // ============================================
 
@@ -252,6 +347,8 @@ zscalerRoutes.get('/diagnostic', async (c) => {
   const oneApi = { configured: auth.isOneApiConfigured(), status: 'not_configured', tokenUrl: '' };
   const legacyZia = { configured: auth.isLegacyZiaConfigured(), status: 'not_configured' };
   const legacyZpa = { configured: auth.isLegacyZpaConfigured(), status: 'not_configured' };
+  const zdx = { configured: auth.isZdxConfigured(), status: 'not_configured' };
+  const analytics = { configured: client.isAnalyticsConfigured(), status: 'not_configured' };
   const risk360 = { configured: true, status: 'checking' };
 
   if (auth.isOneApiConfigured()) {
@@ -288,6 +385,14 @@ zscalerRoutes.get('/diagnostic', async (c) => {
     risk360.status = scores ? 'ok' : 'no_data';
   } catch (e) {
     risk360.status = `error: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  if (auth.isZdxConfigured()) {
+    zdx.status = oneApi.status === 'ok' ? 'ok (via OneAPI)' : 'pending';
+  }
+
+  if (client.isAnalyticsConfigured()) {
+    analytics.status = oneApi.status === 'ok' ? 'ok (via OneAPI)' : 'pending';
   }
 
   const authOk = oneApi.status === 'ok' || legacyZia.status === 'ok';
@@ -340,7 +445,7 @@ zscalerRoutes.get('/diagnostic', async (c) => {
 
   return c.json({
     configured: client.isConfigured(),
-    auth: { oneApi, legacyZia, legacyZpa },
+    auth: { oneApi, legacyZia, legacyZpa, zdx, analytics },
     endpoints: {
       ziaBaseUrl: auth.getZiaBaseUrl(),
       zpaBaseUrl: auth.getZpaBaseUrl(),
@@ -350,6 +455,8 @@ zscalerRoutes.get('/diagnostic', async (c) => {
     modules: {
       zia: { configured: client.isZiaConfigured(), authOk },
       zpa: { configured: client.isZpaConfigured(), authOk: zpaAuthOk },
+      zdx: { configured: client.isZdxConfigured(), authOk: oneApi.status === 'ok' },
+      analytics: { configured: client.isAnalyticsConfigured(), authOk: oneApi.status === 'ok' },
       risk360,
     },
     vanityDomain: c.env.ZSCALER_VANITY_DOMAIN ? `${c.env.ZSCALER_VANITY_DOMAIN.substring(0, 4)}***` : 'not set',

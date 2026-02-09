@@ -43,6 +43,11 @@ export interface Env {
   ZSCALER_ZPA_CLIENT_SECRET?: string;
   ZSCALER_ZPA_CLOUD?: string;
 
+  // Zscaler — ZDX (Digital Experience) credentials (fallback if OneAPI doesn't cover ZDX)
+  ZDX_API_KEY_ID?: string;
+  ZDX_API_SECRET?: string;
+  ZDX_CLOUD?: string;
+
   // Microsoft/Azure credentials
   AZURE_TENANT_ID: string;
   AZURE_CLIENT_ID: string;

@@ -9,6 +9,17 @@ export interface ZPAConnector {
   expectedVersion: string;
   lastBrokerConnectTime: string;
   connectorGroupName: string;
+  platform: string;
+  runtimeOS: string;
+  privateIp: string;
+  publicIp: string;
+}
+
+export interface ZPAConnectorGroup {
+  id: string;
+  name: string;
+  enabled: boolean;
+  connectorCount: number;
 }
 
 export interface ZPASummary {
@@ -16,6 +27,7 @@ export interface ZPASummary {
     total: number;
     enabled: number;
     disabled: number;
+    doubleEncryptEnabled: number;
   };
   connectors: {
     total: number;
@@ -25,6 +37,10 @@ export interface ZPASummary {
     outdated: number;
     byGroup: Record<string, { total: number; healthy: number }>;
     list: ZPAConnector[];
+  };
+  connectorGroups: {
+    total: number;
+    list: ZPAConnectorGroup[];
   };
   serverGroups: {
     total: number;
@@ -47,12 +63,17 @@ export class ZPAClient {
 
   async getApplications(): Promise<ZPASummary['applications']> {
     try {
-      const data = await this.auth.zpaFetch<{ totalPages?: number; list?: Array<{ enabled?: boolean }> }>(
+      const data = await this.auth.zpaFetch<{ totalPages?: number; list?: Array<{
+        enabled?: boolean;
+        doubleEncrypt?: boolean;
+        double_encrypt?: boolean;
+      }> }>(
         `${this.mgmtBase()}/application?page=1&pageSize=500`
       );
       const apps = data.list || [];
       let enabled = 0;
       let disabled = 0;
+      let doubleEncryptEnabled = 0;
 
       for (const app of apps) {
         if (app.enabled !== false) {
@@ -60,12 +81,15 @@ export class ZPAClient {
         } else {
           disabled++;
         }
+        if (app.doubleEncrypt || app.double_encrypt) {
+          doubleEncryptEnabled++;
+        }
       }
 
-      return { total: apps.length, enabled, disabled };
+      return { total: apps.length, enabled, disabled, doubleEncryptEnabled };
     } catch (error) {
       console.error('ZPA getApplications error:', error);
-      return { total: 0, enabled: 0, disabled: 0 };
+      return { total: 0, enabled: 0, disabled: 0, doubleEncryptEnabled: 0 };
     }
   }
 
@@ -83,6 +107,13 @@ export class ZPAClient {
           lastBrokerConnectTime?: string;
           appConnectorGroupName?: string;
           connectorGroupName?: string;
+          platform?: string;
+          runtimeOS?: string;
+          runtime_os?: string;
+          privateIp?: string;
+          private_ip?: string;
+          publicIp?: string;
+          public_ip?: string;
         }>;
       }>(`${this.mgmtBase()}/connector?page=1&pageSize=500`);
 
@@ -124,6 +155,10 @@ export class ZPAClient {
           expectedVersion: c.expectedVersion || '',
           lastBrokerConnectTime: c.lastBrokerConnectTime || '',
           connectorGroupName: groupName,
+          platform: c.platform || '',
+          runtimeOS: c.runtimeOS || c.runtime_os || '',
+          privateIp: c.privateIp || c.private_ip || '',
+          publicIp: c.publicIp || c.public_ip || '',
         });
       }
 
@@ -131,6 +166,31 @@ export class ZPAClient {
     } catch (error) {
       console.error('ZPA getConnectors error:', error);
       return { total: 0, healthy: 0, unhealthy: 0, unknown: 0, outdated: 0, byGroup: {}, list: [] };
+    }
+  }
+
+  async getConnectorGroups(): Promise<ZPASummary['connectorGroups']> {
+    try {
+      const data = await this.auth.zpaFetch<{
+        list?: Array<{
+          id?: string;
+          name?: string;
+          enabled?: boolean;
+          connectors?: unknown[];
+        }>;
+      }>(`${this.mgmtBase()}/connectorGroup?page=1&pageSize=500`);
+
+      const groups = (data.list || []).map(g => ({
+        id: g.id || '',
+        name: g.name || 'Unknown',
+        enabled: g.enabled !== false,
+        connectorCount: Array.isArray(g.connectors) ? g.connectors.length : 0,
+      }));
+
+      return { total: groups.length, list: groups };
+    } catch (error) {
+      console.error('ZPA getConnectorGroups error:', error);
+      return { total: 0, list: [] };
     }
   }
 
@@ -172,18 +232,22 @@ export class ZPAClient {
   }
 
   async getSummary(): Promise<ZPASummary> {
-    const [apps, connectors, serverGroups, segmentGroups, accessPolicies] = await Promise.allSettled([
+    const [apps, connectors, connectorGroups, serverGroups, segmentGroups, accessPolicies] = await Promise.allSettled([
       this.getApplications(),
       this.getConnectors(),
+      this.getConnectorGroups(),
       this.getServerGroups(),
       this.getSegmentGroups(),
       this.getAccessPolicies(),
     ]);
 
     return {
-      applications: apps.status === 'fulfilled' ? apps.value : { total: 0, enabled: 0, disabled: 0 },
+      applications: apps.status === 'fulfilled' ? apps.value
+        : { total: 0, enabled: 0, disabled: 0, doubleEncryptEnabled: 0 },
       connectors: connectors.status === 'fulfilled' ? connectors.value
         : { total: 0, healthy: 0, unhealthy: 0, unknown: 0, outdated: 0, byGroup: {}, list: [] },
+      connectorGroups: connectorGroups.status === 'fulfilled' ? connectorGroups.value
+        : { total: 0, list: [] },
       serverGroups: serverGroups.status === 'fulfilled' ? serverGroups.value : { total: 0 },
       segmentGroups: segmentGroups.status === 'fulfilled' ? segmentGroups.value : { total: 0 },
       accessPolicies: accessPolicies.status === 'fulfilled' ? accessPolicies.value : { total: 0 },

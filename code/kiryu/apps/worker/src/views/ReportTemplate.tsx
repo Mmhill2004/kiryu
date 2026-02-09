@@ -464,6 +464,137 @@ export function renderReport(data: ReportData): string {
       </div>
     </div>` : ''}
 
+    <!-- Zscaler Network Security -->
+    ${data.zscaler ? `
+    <div style="margin-bottom: 40px;" class="page-break">
+      <h2 style="font-size: 20px; font-weight: 700; color: #111827; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 3px solid #f59e0b; display: inline-block;">Network Security (Zscaler)</h2>
+
+      ${data.zscaler.risk360Overall !== null ? `
+      <div style="padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 16px;">
+        <h3 style="font-size: 14px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px;">Risk360</h3>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">
+          <div style="text-align: center; padding: 16px 8px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: ${scoreColor(data.zscaler.risk360Overall)};">${data.zscaler.risk360Overall}</div>
+            <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; margin-top: 4px;">Overall</div>
+          </div>
+          ${data.zscaler.risk360Stages ? `
+          <div style="text-align: center; padding: 16px 8px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.risk360Stages.externalAttackSurface}</div>
+            <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; margin-top: 4px;">Ext. Attack</div>
+          </div>
+          <div style="text-align: center; padding: 16px 8px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.risk360Stages.compromise}</div>
+            <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; margin-top: 4px;">Compromise</div>
+          </div>
+          <div style="text-align: center; padding: 16px 8px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.risk360Stages.lateralPropagation}</div>
+            <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; margin-top: 4px;">Lateral</div>
+          </div>
+          <div style="text-align: center; padding: 16px 8px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.risk360Stages.dataLoss}</div>
+            <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; margin-top: 4px;">Data Loss</div>
+          </div>` : ''}
+        </div>
+      </div>` : ''}
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <!-- ZIA Policy Summary -->
+        <div style="padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <h3 style="font-size: 14px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px;">ZIA Internet Security</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">ATP Protections</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.ziaProtectionsEnabled}</div>
+            </div>
+            <div style="padding: 12px; background: ${data.zscaler.ziaSslInspectionEnabled ? '#f0fdf4' : '#fef2f2'}; border-radius: 8px; border: 1px solid ${data.zscaler.ziaSslInspectionEnabled ? '#bbf7d0' : '#fecaca'};">
+              <div style="font-size: 11px; color: #6b7280;">SSL Inspection</div>
+              <div style="font-size: 16px; font-weight: 700; color: ${data.zscaler.ziaSslInspectionEnabled ? '#22c55e' : '#ef4444'};">${data.zscaler.ziaSslInspectionEnabled ? 'Enabled' : 'Disabled'}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">URL Filter Rules</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.ziaUrlFilterRules}</div>
+            </div>
+            <div style="padding: 12px; background: ${data.zscaler.ziaSandboxEnabled ? '#f0fdf4' : '#fefce8'}; border-radius: 8px; border: 1px solid ${data.zscaler.ziaSandboxEnabled ? '#bbf7d0' : '#fde68a'};">
+              <div style="font-size: 11px; color: #6b7280;">Cloud Sandbox</div>
+              <div style="font-size: 16px; font-weight: 700; color: ${data.zscaler.ziaSandboxEnabled ? '#22c55e' : '#eab308'};">${data.zscaler.ziaSandboxEnabled ? 'Enabled' : 'Disabled'}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ZPA Connector Health -->
+        <div style="padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <h3 style="font-size: 14px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px;">ZPA Private Access</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="padding: 12px; background: ${data.zscaler.zpaConnectorsUnhealthy > 0 ? '#fef2f2' : '#f0fdf4'}; border-radius: 8px; border: 1px solid ${data.zscaler.zpaConnectorsUnhealthy > 0 ? '#fecaca' : '#bbf7d0'};">
+              <div style="font-size: 11px; color: #6b7280;">Connectors</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: ${data.zscaler.zpaConnectorsUnhealthy > 0 ? '#ef4444' : '#22c55e'};">${data.zscaler.zpaConnectorsHealthy}/${data.zscaler.zpaConnectorsTotal}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Applications</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.zpaAppsTotal}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Connector Groups</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.zpaConnectorGroups}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Double Encrypt</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.zpaDoubleEncryptApps}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${data.zscaler.zdxAvgScore !== null ? `
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <!-- ZDX Performance -->
+        <div style="padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <h3 style="font-size: 14px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px;">Digital Experience (ZDX)</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="padding: 12px; background: ${data.zscaler.zdxAvgScore < 34 ? '#fef2f2' : data.zscaler.zdxAvgScore < 66 ? '#fefce8' : '#f0fdf4'}; border-radius: 8px; border: 1px solid ${data.zscaler.zdxAvgScore < 34 ? '#fecaca' : data.zscaler.zdxAvgScore < 66 ? '#fde68a' : '#bbf7d0'};">
+              <div style="font-size: 11px; color: #6b7280;">Avg Score</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: ${data.zscaler.zdxAvgScore < 34 ? '#ef4444' : data.zscaler.zdxAvgScore < 66 ? '#eab308' : '#22c55e'};">${data.zscaler.zdxAvgScore.toFixed(0)}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Category</div>
+              <div style="font-size: 16px; font-weight: 700; color: #111827;">${escapeHtml(data.zscaler.zdxScoreCategory || 'N/A')}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Apps Monitored</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.zdxAppsMonitored}</div>
+            </div>
+            <div style="padding: 12px; background: ${data.zscaler.zdxActiveAlerts > 0 ? '#fff7ed' : '#ffffff'}; border-radius: 8px; border: 1px solid ${data.zscaler.zdxActiveAlerts > 0 ? '#fed7aa' : '#e5e7eb'};">
+              <div style="font-size: 11px; color: #6b7280;">Active Alerts</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: ${data.zscaler.zdxActiveAlerts > 0 ? '#f97316' : '#111827'};">${data.zscaler.zdxActiveAlerts}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Traffic Analytics -->
+        <div style="padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <h3 style="font-size: 14px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px;">Traffic Analytics</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="padding: 12px; background: #f0fdf4; border-radius: 8px; border: 1px solid #bbf7d0;">
+              <div style="font-size: 11px; color: #6b7280;">Allowed</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #22c55e;">${data.zscaler.analyticsTrafficAllowed.toLocaleString()}</div>
+            </div>
+            <div style="padding: 12px; background: ${data.zscaler.analyticsTrafficBlocked > 0 ? '#fef2f2' : '#ffffff'}; border-radius: 8px; border: 1px solid ${data.zscaler.analyticsTrafficBlocked > 0 ? '#fecaca' : '#e5e7eb'};">
+              <div style="font-size: 11px; color: #6b7280;">Blocked</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: ${data.zscaler.analyticsTrafficBlocked > 0 ? '#ef4444' : '#111827'};">${data.zscaler.analyticsTrafficBlocked.toLocaleString()}</div>
+            </div>
+            <div style="padding: 12px; background: ${data.zscaler.analyticsThreatsTotal > 0 ? '#fef2f2' : '#ffffff'}; border-radius: 8px; border: 1px solid ${data.zscaler.analyticsThreatsTotal > 0 ? '#fecaca' : '#e5e7eb'};">
+              <div style="font-size: 11px; color: #6b7280;">Threats Detected</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: ${data.zscaler.analyticsThreatsTotal > 0 ? '#ef4444' : '#111827'};">${data.zscaler.analyticsThreatsTotal.toLocaleString()}</div>
+            </div>
+            <div style="padding: 12px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 11px; color: #6b7280;">Devices (ZDX)</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #111827;">${data.zscaler.zdxTotalDevices.toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+      </div>` : ''}
+    </div>` : ''}
+
     <!-- Recommendations -->
     ${data.recommendations.length > 0 ? `
     <div style="margin-bottom: 40px;">
