@@ -3,6 +3,8 @@ import { Layout } from './Layout';
 import { SecurityScore } from './components/SecurityScore';
 import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
+import { GaugeChart } from './components/GaugeChart';
+import { DonutChart } from './components/DonutChart';
 import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, ZTASummary, CrowdScoreSummary, IDPSummary, DiscoverSummary, SensorUsageSummary, IntelSummary } from '../integrations/crowdstrike/client';
 import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
@@ -330,14 +332,26 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 {/* Row 2: Incidents, Vulnerabilities, ZTA & Identity */}
                 <div class="card card-compact col-4">
                   <div class="card-title">Incidents ({crowdstrike.incidents.total})</div>
-                  <div class="mini-metric-grid">
-                    <MetricCard label="Open" value={crowdstrike.incidents.open} compact
-                      severity={crowdstrike.incidents.open > 0 ? 'high' : undefined}
-                      trend={csTrends?.incidentsOpen ? csTrends.incidentsOpen : undefined} />
-                    <MetricCard label="Closed" value={crowdstrike.incidents.closed} compact />
-                    <MetricCard label="Lateral" value={crowdstrike.incidents.withLateralMovement} compact
-                      severity={crowdstrike.incidents.withLateralMovement > 0 ? 'critical' : undefined} />
-                    <MetricCard label="MTTR" value={crowdstrike.incidents.mttr ? formatDuration(crowdstrike.incidents.mttr * 60) : 'N/A'} compact />
+                  <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                    <div style="flex-shrink: 0;">
+                      <GaugeChart
+                        value={crowdstrike.incidents.total > 0 ? Math.round((crowdstrike.incidents.closed / crowdstrike.incidents.total) * 100) : 0}
+                        label="Closed"
+                        sublabel="rate"
+                        size="sm"
+                      />
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div class="mini-metric-grid">
+                        <MetricCard label="Open" value={crowdstrike.incidents.open} compact
+                          severity={crowdstrike.incidents.open > 0 ? 'high' : undefined}
+                          trend={csTrends?.incidentsOpen ? csTrends.incidentsOpen : undefined} />
+                        <MetricCard label="Closed" value={crowdstrike.incidents.closed} compact />
+                        <MetricCard label="Lateral" value={crowdstrike.incidents.withLateralMovement} compact
+                          severity={crowdstrike.incidents.withLateralMovement > 0 ? 'critical' : undefined} />
+                        <MetricCard label="MTTR" value={crowdstrike.incidents.mttr ? formatDuration(crowdstrike.incidents.mttr * 60) : 'N/A'} compact />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -345,21 +359,34 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <div class="card-title">Vulnerabilities ({crowdstrike.vulnerabilities?.total ?? 0})</div>
                   {crowdstrike.vulnerabilities ? (
                     <>
-                      <div class="mini-metric-grid">
-                        <MetricCard label="Critical" value={crowdstrike.vulnerabilities.bySeverity.critical} compact severity="critical" />
-                        <MetricCard label="High" value={crowdstrike.vulnerabilities.bySeverity.high} compact severity="high" />
-                        <MetricCard label="Exploits" value={crowdstrike.vulnerabilities.withExploits} compact severity={crowdstrike.vulnerabilities.withExploits > 0 ? 'critical' : undefined} />
-                        <MetricCard label="Hosts" value={crowdstrike.vulnerabilities.affectedHosts} compact />
-                      </div>
-                      {crowdstrike.vulnerabilities.topCVEs.length > 0 && (
-                        <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
-                          {crowdstrike.vulnerabilities.topCVEs.slice(0, 3).map((cve) => (
-                            <span key={cve.cve_id} class={`badge badge-${cve.severity === 'CRITICAL' ? 'critical' : cve.severity === 'HIGH' ? 'high' : 'medium'}`}>
-                              {cve.cve_id}
-                            </span>
-                          ))}
+                      <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                        <div style="flex-shrink: 0;">
+                          <DonutChart
+                            segments={[
+                              { label: 'Critical', value: crowdstrike.vulnerabilities.bySeverity.critical, color: 'var(--critical)' },
+                              { label: 'High', value: crowdstrike.vulnerabilities.bySeverity.high, color: 'var(--high)' },
+                              { label: 'Medium', value: crowdstrike.vulnerabilities.bySeverity.medium ?? 0, color: 'var(--medium)' },
+                              { label: 'Low', value: crowdstrike.vulnerabilities.bySeverity.low ?? 0, color: 'var(--low)' },
+                            ]}
+                            centerLabel="Total"
+                          />
                         </div>
-                      )}
+                        <div style="flex: 1; min-width: 0;">
+                          <div class="mini-metric-grid">
+                            <MetricCard label="Exploits" value={crowdstrike.vulnerabilities.withExploits} compact severity={crowdstrike.vulnerabilities.withExploits > 0 ? 'critical' : undefined} />
+                            <MetricCard label="Hosts" value={crowdstrike.vulnerabilities.affectedHosts} compact />
+                          </div>
+                          {crowdstrike.vulnerabilities.topCVEs.length > 0 && (
+                            <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
+                              {crowdstrike.vulnerabilities.topCVEs.slice(0, 3).map((cve) => (
+                                <span key={cve.cve_id} class={`badge badge-${cve.severity === 'CRITICAL' ? 'critical' : cve.severity === 'HIGH' ? 'high' : 'medium'}`}>
+                                  {cve.cve_id}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </>
                   ) : (
                     <p class="no-data">No vulnerability data</p>
@@ -368,12 +395,24 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 <div class="card card-compact col-4">
                   <div class="card-title">ZTA &amp; Identity</div>
-                  <div class="mini-metric-grid">
-                    <MetricCard label="ZTA Avg" value={crowdstrike.zta.avgScore} compact
-                      trend={csTrends?.ztaAvgScore ? { ...csTrends.ztaAvgScore, invertColor: true } : undefined} />
-                    <MetricCard label="Good+" value={crowdstrike.zta.scoreDistribution.excellent + crowdstrike.zta.scoreDistribution.good} compact severity="low" />
-                    <MetricCard label="Fair" value={crowdstrike.zta.scoreDistribution.fair} compact severity={crowdstrike.zta.scoreDistribution.fair > 0 ? 'medium' : undefined} />
-                    <MetricCard label="Poor" value={crowdstrike.zta.scoreDistribution.poor} compact severity={crowdstrike.zta.scoreDistribution.poor > 0 ? 'critical' : undefined} />
+                  <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                    <div style="flex-shrink: 0;">
+                      <GaugeChart
+                        value={crowdstrike.zta.avgScore}
+                        label="ZTA Score"
+                        size="sm"
+                      />
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <DonutChart
+                        segments={[
+                          { label: 'Good+', value: crowdstrike.zta.scoreDistribution.excellent + crowdstrike.zta.scoreDistribution.good, color: 'var(--healthy)' },
+                          { label: 'Fair', value: crowdstrike.zta.scoreDistribution.fair, color: 'var(--medium)' },
+                          { label: 'Poor', value: crowdstrike.zta.scoreDistribution.poor, color: 'var(--critical)' },
+                        ]}
+                        centerLabel="Devices"
+                      />
+                    </div>
                   </div>
                   {crowdstrike.identity && (
                     <div style="margin-top: var(--sp-2);">
@@ -491,12 +530,15 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 {/* Row 2: Entra, Defender, Identity */}
                 <div class="card card-compact col-4">
                   <div class="card-title">Entra Alerts ({microsoft.alertAnalytics.total})</div>
-                  <div class="mini-metric-grid">
-                    <MetricCard label="High" value={microsoft.alertAnalytics.bySeverity.high} compact severity="critical" />
-                    <MetricCard label="Medium" value={microsoft.alertAnalytics.bySeverity.medium} compact severity="medium" />
-                    <MetricCard label="Low" value={microsoft.alertAnalytics.bySeverity.low} compact severity="low" />
-                    <MetricCard label="Info" value={microsoft.alertAnalytics.bySeverity.informational} compact />
-                  </div>
+                  <DonutChart
+                    segments={[
+                      { label: 'High', value: microsoft.alertAnalytics.bySeverity.high, color: 'var(--critical)' },
+                      { label: 'Medium', value: microsoft.alertAnalytics.bySeverity.medium, color: 'var(--medium)' },
+                      { label: 'Low', value: microsoft.alertAnalytics.bySeverity.low, color: 'var(--low)' },
+                      { label: 'Info', value: microsoft.alertAnalytics.bySeverity.informational, color: 'var(--info)' },
+                    ]}
+                    centerLabel="Alerts"
+                  />
                   {Object.keys(microsoft.alertAnalytics.byCategory).length > 0 && (
                     <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
                       {Object.entries(microsoft.alertAnalytics.byCategory).slice(0, 3).map(([cat, count]) => (
@@ -508,12 +550,15 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 <div class="card card-compact col-4">
                   <div class="card-title">Defender ({microsoft.defenderAnalytics.total})</div>
-                  <div class="mini-metric-grid">
-                    <MetricCard label="High" value={microsoft.defenderAnalytics.bySeverity.high} compact severity="critical" />
-                    <MetricCard label="Medium" value={microsoft.defenderAnalytics.bySeverity.medium} compact severity="medium" />
-                    <MetricCard label="Low" value={microsoft.defenderAnalytics.bySeverity.low} compact severity="low" />
-                    <MetricCard label="Linked" value={microsoft.defenderAnalytics.linkedToIncidents} compact />
-                  </div>
+                  <DonutChart
+                    segments={[
+                      { label: 'High', value: microsoft.defenderAnalytics.bySeverity.high, color: 'var(--critical)' },
+                      { label: 'Medium', value: microsoft.defenderAnalytics.bySeverity.medium, color: 'var(--medium)' },
+                      { label: 'Low', value: microsoft.defenderAnalytics.bySeverity.low, color: 'var(--low)' },
+                      { label: 'Linked', value: microsoft.defenderAnalytics.linkedToIncidents, color: 'var(--info)' },
+                    ]}
+                    centerLabel="Alerts"
+                  />
                   {Object.keys(microsoft.defenderAnalytics.byDetectionSource).length > 0 && (
                     <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
                       {Object.entries(microsoft.defenderAnalytics.byDetectionSource).slice(0, 3).map(([src, count]) => (
@@ -549,15 +594,30 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   <div class="card-title">Incidents ({microsoft.incidents.total})</div>
                   {microsoft.incidents.total > 0 ? (
                     <>
-                      <div class="mini-metric-grid">
-                        <MetricCard label="Open" value={microsoft.incidents.open} compact severity={microsoft.incidents.open > 0 ? 'high' : undefined} />
-                        <MetricCard label="Unassigned" value={microsoft.incidents.unassigned} compact severity={microsoft.incidents.unassigned > 0 ? 'medium' : undefined} />
-                        <MetricCard label="Redirected" value={microsoft.incidents.redirected} compact />
+                      <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                        <div style="flex-shrink: 0;">
+                          <GaugeChart
+                            value={microsoft.incidents.total > 0 ? Math.round(((microsoft.incidents.total - microsoft.incidents.open) / microsoft.incidents.total) * 100) : 0}
+                            label="Resolved"
+                            size="sm"
+                          />
+                        </div>
+                        <div style="flex: 1; min-width: 0;">
+                          <DonutChart
+                            segments={[
+                              { label: 'High', value: microsoft.incidents.bySeverity.high, color: 'var(--critical)' },
+                              { label: 'Medium', value: microsoft.incidents.bySeverity.medium, color: 'var(--medium)' },
+                              { label: 'Low', value: microsoft.incidents.bySeverity.low, color: 'var(--low)' },
+                            ]}
+                            centerLabel="Severity"
+                          />
+                        </div>
                       </div>
-                      <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
-                        <span class="badge badge-critical">High: {microsoft.incidents.bySeverity.high}</span>
-                        <span class="badge badge-medium">Med: {microsoft.incidents.bySeverity.medium}</span>
-                        <span class="badge badge-low">Low: {microsoft.incidents.bySeverity.low}</span>
+                      <div style="margin-top: var(--sp-2);">
+                        <div class="mini-metric-grid">
+                          <MetricCard label="Open" value={microsoft.incidents.open} compact severity={microsoft.incidents.open > 0 ? 'high' : undefined} />
+                          <MetricCard label="Unassigned" value={microsoft.incidents.unassigned} compact severity={microsoft.incidents.unassigned > 0 ? 'medium' : undefined} />
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -584,17 +644,29 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 <div class="card card-compact col-4">
                   <div class="card-title">Compliance &amp; Cloud</div>
-                  <div class="mini-metric-grid">
-                    <MetricCard label="Compliant" value={`${(microsoft.compliance.compliant + microsoft.compliance.nonCompliant) > 0 ? ((microsoft.compliance.compliant / (microsoft.compliance.compliant + microsoft.compliance.nonCompliant)) * 100).toFixed(0) : 0}%`} compact />
-                    <MetricCard label="Pass Rate" value={`${microsoft.assessments.passRate.toFixed(0)}%`} compact />
-                    <MetricCard label="Unhealthy" value={microsoft.assessments.unhealthy} compact severity={microsoft.assessments.unhealthy > 0 ? 'high' : undefined} />
+                  <div class="gauge-row">
+                    <GaugeChart
+                      value={(microsoft.compliance.compliant + microsoft.compliance.nonCompliant) > 0 ? Math.round((microsoft.compliance.compliant / (microsoft.compliance.compliant + microsoft.compliance.nonCompliant)) * 100) : 0}
+                      label="Compliant"
+                      size="sm"
+                    />
+                    <GaugeChart
+                      value={Math.round(microsoft.assessments.passRate)}
+                      label="Pass Rate"
+                      size="sm"
+                    />
+                    {microsoft.secureScore && microsoft.secureScore.maxScore > 0 && (
+                      <GaugeChart
+                        value={Math.round((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100)}
+                        label="Secure Score"
+                        sublabel={`${microsoft.secureScore.currentScore.toFixed(0)}/${microsoft.secureScore.maxScore.toFixed(0)}`}
+                        size="sm"
+                      />
+                    )}
                   </div>
-                  {microsoft.secureScore && (
-                    <div style="margin-top: var(--sp-2);">
-                      <div class="stat-row">
-                        <span class="stat-label">Secure Score</span>
-                        <span class="stat-value">{microsoft.secureScore.currentScore.toFixed(1)} / {microsoft.secureScore.maxScore.toFixed(1)}</span>
-                      </div>
+                  {microsoft.assessments.unhealthy > 0 && (
+                    <div style="margin-top: var(--sp-2); text-align: center;">
+                      <span class="badge badge-high">Unhealthy: {microsoft.assessments.unhealthy}</span>
                     </div>
                   )}
                 </div>
@@ -655,16 +727,29 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
                 {/* Row 2: Priority, Aging, Workload */}
                 <div class="card card-compact col-4">
-                  <div class="card-title">Priority Breakdown</div>
-                  <div class="mini-metric-grid">
-                    {Object.entries(salesforce.ticketsByPriority).slice(0, 4).map(([priority, count]) => {
-                      const sev = priority.toLowerCase().includes('high') ? 'critical' as const
-                        : priority.toLowerCase().includes('medium') ? 'medium' as const
-                        : priority.toLowerCase().includes('low') ? 'low' as const
-                        : undefined;
-                      return <MetricCard key={priority} label={priority} value={count ?? 0} compact severity={sev} />;
-                    })}
-                    {Object.keys(salesforce.ticketsByPriority).length === 0 && <p class="no-data">No data</p>}
+                  <div class="card-title">Priority &amp; SLA</div>
+                  <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                    <div style="flex-shrink: 0;">
+                      <GaugeChart
+                        value={Math.round(salesforce.slaComplianceRate)}
+                        label="SLA"
+                        sublabel="compliance"
+                        size="sm"
+                      />
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <DonutChart
+                        segments={Object.entries(salesforce.ticketsByPriority).slice(0, 4).map(([priority, count]) => ({
+                          label: priority,
+                          value: count ?? 0,
+                          color: priority.toLowerCase().includes('high') ? 'var(--critical)'
+                            : priority.toLowerCase().includes('medium') ? 'var(--medium)'
+                            : priority.toLowerCase().includes('low') ? 'var(--low)'
+                            : 'var(--info)',
+                        }))}
+                        centerLabel="Cases"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -998,20 +1083,26 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   {/* Row 2: Score Distribution + Best/Worst + Regional Impact */}
                   <div class="card card-compact col-4">
                     <div class="card-title">Score Distribution</div>
-                    <div class="mini-metric-grid">
-                      <MetricCard label="Good (66+)" value={goodApps.length} compact severity="low" />
-                      <MetricCard label="Okay (34-65)" value={okayApps.length} compact severity={okayApps.length > 0 ? 'medium' : undefined} />
-                      <MetricCard label="Poor (&lt;34)" value={poorApps.length} compact severity={poorApps.length > 0 ? 'critical' : undefined} />
-                      <MetricCard label="Devices" value={zdx.totalDevices} compact />
-                    </div>
-                    {/* Score bar visualization */}
-                    {zdx.apps.length > 0 && (
-                      <div style="margin-top: var(--sp-2); height: 8px; border-radius: 4px; display: flex; overflow: hidden; background: var(--bg-card);">
-                        {goodApps.length > 0 && <div style={`width: ${(goodApps.length / zdx.apps.length) * 100}%; background: var(--success);`} />}
-                        {okayApps.length > 0 && <div style={`width: ${(okayApps.length / zdx.apps.length) * 100}%; background: var(--warning);`} />}
-                        {poorApps.length > 0 && <div style={`width: ${(poorApps.length / zdx.apps.length) * 100}%; background: var(--danger);`} />}
+                    <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                      <div style="flex-shrink: 0;">
+                        <GaugeChart
+                          value={zdx.averageScore >= 0 ? zdx.averageScore : 0}
+                          label="Avg Score"
+                          sublabel={zdx.scoreCategory}
+                          size="sm"
+                        />
                       </div>
-                    )}
+                      <div style="flex: 1; min-width: 0;">
+                        <DonutChart
+                          segments={[
+                            { label: 'Good', value: goodApps.length, color: 'var(--healthy)' },
+                            { label: 'Okay', value: okayApps.length, color: 'var(--medium)' },
+                            { label: 'Poor', value: poorApps.length, color: 'var(--critical)' },
+                          ]}
+                          centerLabel="Apps"
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div class="card card-compact col-4">
