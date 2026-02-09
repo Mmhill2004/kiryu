@@ -4,6 +4,7 @@ import { AbnormalClient } from '../integrations/abnormal/client';
 import { ZscalerClient } from '../integrations/zscaler/client';
 import { MicrosoftClient } from '../integrations/microsoft/client';
 import { SalesforceClient } from '../integrations/salesforce/client';
+import { MerakiClient } from '../integrations/meraki/client';
 
 export interface SyncResult {
   platform: string;
@@ -29,6 +30,7 @@ export class SyncService {
       this.syncPlatform('zscaler').catch(e => this.handleSyncError('zscaler', e)),
       this.syncPlatform('microsoft').catch(e => this.handleSyncError('microsoft', e)),
       this.syncPlatform('salesforce').catch(e => this.handleSyncError('salesforce', e)),
+      this.syncPlatform('meraki').catch(e => this.handleSyncError('meraki', e)),
     ];
 
     const syncResults = await Promise.all(syncPromises);
@@ -43,6 +45,7 @@ export class SyncService {
         cacheService.invalidatePrefix('sf:metrics'),
         cacheService.invalidatePrefix('ms:summary'),
         cacheService.invalidatePrefix('zs:summary'),
+        cacheService.invalidatePrefix('mk:summary'),
       ]);
     } catch { /* ignore cache errors */ }
 
@@ -83,6 +86,9 @@ export class SyncService {
           break;
         case 'salesforce':
           result = await this.syncSalesforce();
+          break;
+        case 'meraki':
+          result = await this.syncMeraki();
           break;
         default:
           throw new Error(`Unknown platform: ${platform}`);
@@ -622,6 +628,72 @@ export class SyncService {
     return { platform: 'salesforce', status: 'success', recordsSynced };
   }
 
+  private async syncMeraki(): Promise<SyncResult> {
+    const client = new MerakiClient(this.env);
+    if (!client.isConfigured()) {
+      return { platform: 'meraki', status: 'skipped', error: 'Not configured' };
+    }
+
+    const summary = await client.getSummary();
+    let recordsSynced = 0;
+
+    const today = new Date().toISOString().split('T')[0];
+    const orgId = this.env.MERAKI_ORG_ID || '';
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO meraki_metrics_daily (
+          date, org_id,
+          devices_total, devices_online, devices_alerting, devices_offline, devices_dormant,
+          devices_wireless, devices_switch, devices_appliance, devices_camera, devices_sensor,
+          networks_total,
+          vpn_tunnels_total, vpn_tunnels_online, vpn_tunnels_offline,
+          uplinks_total, uplinks_active, uplinks_failed,
+          license_status, license_expiration, licensed_device_count,
+          metadata, created_at
+        ) VALUES (
+          ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, datetime('now')
+        )
+      `).bind(
+        today, orgId,
+        summary.devices.total, summary.devices.online, summary.devices.alerting,
+        summary.devices.offline, summary.devices.dormant,
+        summary.devices.byProductType['wireless'] ?? 0,
+        summary.devices.byProductType['switch'] ?? 0,
+        summary.devices.byProductType['appliance'] ?? 0,
+        summary.devices.byProductType['camera'] ?? 0,
+        summary.devices.byProductType['sensor'] ?? 0,
+        summary.networks.total,
+        summary.vpn.totalTunnels, summary.vpn.online, summary.vpn.offline,
+        summary.uplinks.totalUplinks, summary.uplinks.active, summary.uplinks.failed,
+        summary.licensing.status, summary.licensing.expirationDate, summary.licensing.licensedDeviceCount,
+        JSON.stringify({ errors: summary.errors })
+      ).run();
+      recordsSynced++;
+    } catch (error) {
+      console.error('Error storing meraki_metrics_daily:', error);
+    }
+
+    await this.updatePlatformStatus('meraki', 'healthy', {
+      devices_total: summary.devices.total,
+      devices_online: summary.devices.online,
+      devices_alerting: summary.devices.alerting,
+      networks: summary.networks.total,
+      vpn_online: summary.vpn.online,
+      uplinks_active: summary.uplinks.active,
+      license_status: summary.licensing.status,
+      errors: summary.errors,
+    });
+
+    return { platform: 'meraki', status: 'success', recordsSynced };
+  }
+
   private async cleanupOldData(): Promise<void> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 90);
@@ -632,6 +704,7 @@ export class SyncService {
       ['crowdstrike_metrics_daily', 'date'],
       ['ticket_metrics_daily', 'date'],
       ['zscaler_metrics_daily', 'date'],
+      ['meraki_metrics_daily', 'date'],
       ['daily_summaries', 'date'],
       ['security_events', 'created_at'],
       ['sync_logs', 'started_at'],
@@ -641,6 +714,7 @@ export class SyncService {
       { name: 'crowdstrike_metrics_daily', dateCol: 'date' },
       { name: 'ticket_metrics_daily', dateCol: 'date' },
       { name: 'zscaler_metrics_daily', dateCol: 'date' },
+      { name: 'meraki_metrics_daily', dateCol: 'date' },
       { name: 'daily_summaries', dateCol: 'date' },
       { name: 'security_events', dateCol: 'created_at' },
       { name: 'sync_logs', dateCol: 'started_at' },

@@ -64,6 +64,7 @@ export const CACHE_KEYS = {
   SALESFORCE_METRICS: 'sf:metrics',
   MICROSOFT_SUMMARY: 'ms:summary',
   ZSCALER_SUMMARY: 'zs:summary',
+  MERAKI_SUMMARY: 'mk:summary',
   CROWDSTRIKE_TOKEN: 'auth:cs:token',
   SALESFORCE_TOKEN: 'auth:sf:token',
   REPORT_GENERATED: 'report:generated',

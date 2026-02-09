@@ -9,7 +9,8 @@ import type { AlertSummary, HostSummary, IncidentSummary, VulnerabilitySummary, 
 import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
 import type { ZscalerFullSummary } from '../integrations/zscaler/client';
-import type { CrowdStrikeTrends, SalesforceTrends, ZscalerTrends } from '../services/trends';
+import type { MerakiSummary } from '../integrations/meraki/client';
+import type { CrowdStrikeTrends, SalesforceTrends, ZscalerTrends, MerakiTrends } from '../services/trends';
 
 interface DashboardData {
   crowdstrike: {
@@ -29,6 +30,7 @@ interface DashboardData {
   salesforce: TicketMetrics | null;
   microsoft: MicrosoftFullSummary | null;
   zscaler: ZscalerFullSummary | null;
+  meraki: MerakiSummary | null;
   platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -42,6 +44,7 @@ interface DashboardData {
   csTrends: CrowdStrikeTrends | null;
   sfTrends: SalesforceTrends | null;
   zsTrends: ZscalerTrends | null;
+  mkTrends: MerakiTrends | null;
 }
 
 interface Props {
@@ -127,7 +130,7 @@ function calculateCompositeScore(
 }
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, microsoft, zscaler, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends, zsTrends } = data;
+  const { crowdstrike, salesforce, microsoft, zscaler, meraki, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends, zsTrends, mkTrends } = data;
 
   const securityScore = calculateCompositeScore(crowdstrike, microsoft);
 
@@ -308,6 +311,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
             <button class="tab-btn" data-tab="zia">ZIA</button>
             <button class="tab-btn" data-tab="zpa">ZPA</button>
             <button class="tab-btn" data-tab="zdx">ZDX</button>
+            <button class="tab-btn" data-tab="meraki">Meraki</button>
           </div>
 
           {/* ═══ CROWDSTRIKE TAB ═══ */}
@@ -1212,6 +1216,164 @@ export const Dashboard: FC<Props> = ({ data }) => {
             })() : (
               <div class="col-12">
                 <p class="no-data">ZDX not configured or no data available</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ MERAKI TAB ═══ */}
+          <div id="tab-meraki" class="tab-content">
+            {meraki ? (() => {
+              const d = meraki.devices;
+              const vpnOnlinePct = meraki.vpn.totalTunnels > 0 ? Math.round((meraki.vpn.online / meraki.vpn.totalTunnels) * 100) : 0;
+              const uplinkActivePct = meraki.uplinks.totalUplinks > 0 ? Math.round((meraki.uplinks.active / meraki.uplinks.totalUplinks) * 100) : 0;
+
+              // Product type breakdown for donut
+              const ptEntries = Object.entries(d.byProductType).sort((a, b) => b[1] - a[1]);
+              const ptColors: Record<string, string> = {
+                wireless: 'var(--info)',
+                switch: 'var(--healthy)',
+                appliance: 'var(--medium)',
+                camera: 'var(--low)',
+                sensor: '#8b5cf6',
+              };
+
+              return (
+                <>
+                  {/* Row 1: KPI cards */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(7, 1fr);">
+                      <MetricCard label="Devices Online" value={`${d.online}/${d.total}`} source="MK" compact
+                        trend={mkTrends?.devicesOnline ? mkTrends.devicesOnline : undefined} />
+                      <MetricCard label="Alerting" value={d.alerting} compact
+                        severity={d.alerting > 0 ? 'critical' : undefined}
+                        trend={mkTrends?.devicesAlerting ? { ...mkTrends.devicesAlerting, invertColor: true } : undefined} />
+                      <MetricCard label="Offline" value={d.offline} compact
+                        severity={d.offline > 0 ? 'high' : undefined} />
+                      <MetricCard label="Networks" value={meraki.networks.total} compact />
+                      <MetricCard label="VPN Online" value={`${meraki.vpn.online}/${meraki.vpn.totalTunnels}`} compact
+                        trend={mkTrends?.vpnOnline ? mkTrends.vpnOnline : undefined} />
+                      <MetricCard label="Uplinks Active" value={`${meraki.uplinks.active}/${meraki.uplinks.totalUplinks}`} compact
+                        trend={mkTrends?.uplinksActive ? mkTrends.uplinksActive : undefined} />
+                      <MetricCard label="License" value={meraki.licensing.status} compact
+                        severity={meraki.licensing.status === 'OK' || meraki.licensing.status === 'ok' ? undefined : 'medium'} />
+                    </div>
+                  </div>
+
+                  {/* Row 2: Device Breakdown + VPN Health + Uplink Health */}
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Devices by Type</div>
+                    {ptEntries.length > 0 ? (
+                      <DonutChart
+                        segments={ptEntries.map(([type, count]) => ({
+                          label: type.charAt(0).toUpperCase() + type.slice(1),
+                          value: count,
+                          color: ptColors[type] ?? 'var(--text-muted)',
+                        }))}
+                        centerLabel="Devices"
+                      />
+                    ) : (
+                      <p class="no-data">No device type data</p>
+                    )}
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">VPN Health</div>
+                    <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                      <div style="flex-shrink: 0;">
+                        <GaugeChart value={vpnOnlinePct} label="Online" sublabel={`${meraki.vpn.online}/${meraki.vpn.totalTunnels}`} size="sm" />
+                      </div>
+                      <div style="flex: 1; min-width: 0;">
+                        <div class="mini-metric-grid">
+                          <MetricCard label="Online" value={meraki.vpn.online} compact severity="low" />
+                          <MetricCard label="Offline" value={meraki.vpn.offline} compact severity={meraki.vpn.offline > 0 ? 'critical' : undefined} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Uplink Health</div>
+                    <div style="display: flex; gap: var(--sp-3); align-items: flex-start;">
+                      <div style="flex-shrink: 0;">
+                        <GaugeChart value={uplinkActivePct} label="Active" sublabel={`${meraki.uplinks.active}/${meraki.uplinks.totalUplinks}`} size="sm" />
+                      </div>
+                      <div style="flex: 1; min-width: 0;">
+                        <div class="mini-metric-grid">
+                          <MetricCard label="Active" value={meraki.uplinks.active} compact severity="low" />
+                          <MetricCard label="Failed" value={meraki.uplinks.failed} compact severity={meraki.uplinks.failed > 0 ? 'critical' : undefined} />
+                        </div>
+                        {Object.keys(meraki.uplinks.byInterface).length > 0 && (
+                          <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
+                            {Object.entries(meraki.uplinks.byInterface).map(([iface, count]) => (
+                              <span key={iface} class="badge badge-info">{iface}: {count}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Device Table */}
+                  <div class="card card-compact col-12">
+                    <div class="card-title">Devices ({meraki.deviceList.length})</div>
+                    <table class="compact-table">
+                      <thead>
+                        <tr><th>Name</th><th>Model</th><th>Type</th><th>Status</th><th>Public IP</th></tr>
+                      </thead>
+                      <tbody>
+                        {meraki.deviceList.slice(0, 50).map((dev) => (
+                          <tr key={dev.serial}>
+                            <td style="font-weight: 500;">{dev.name}</td>
+                            <td style="font-size: 0.6rem; color: var(--text-muted);">{dev.model}</td>
+                            <td>{dev.productType}</td>
+                            <td>
+                              <span class={`badge ${dev.status === 'online' ? 'badge-low' : dev.status === 'alerting' ? 'badge-critical' : dev.status === 'offline' ? 'badge-high' : 'badge-medium'}`}>
+                                {dev.status}
+                              </span>
+                            </td>
+                            <td style="font-size: 0.6rem; color: var(--text-muted);">{dev.publicIp || '-'}</td>
+                          </tr>
+                        ))}
+                        {meraki.deviceList.length === 0 && (
+                          <tr><td colSpan={5}><p class="no-data">No devices</p></td></tr>
+                        )}
+                        {meraki.deviceList.length > 50 && (
+                          <tr><td colSpan={5} style="text-align: center; font-size: 0.6rem; color: var(--text-muted);">Showing 50 of {meraki.deviceList.length} devices</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Row 4: VPN Peers Table */}
+                  {meraki.vpn.peers.length > 0 && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">VPN Peers ({meraki.vpn.peers.length})</div>
+                      <table class="compact-table">
+                        <thead>
+                          <tr><th>Network</th><th>Mode</th><th>Status</th><th>Reachable Peers</th></tr>
+                        </thead>
+                        <tbody>
+                          {meraki.vpn.peers.slice(0, 30).map((peer) => (
+                            <tr key={peer.networkName}>
+                              <td style="font-weight: 500;">{peer.networkName}</td>
+                              <td>{peer.vpnMode}</td>
+                              <td>
+                                <span class={`badge ${peer.status === 'online' ? 'badge-low' : 'badge-critical'}`}>
+                                  {peer.status}
+                                </span>
+                              </td>
+                              <td>{peer.reachablePeers}/{peer.totalPeers}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">Meraki not configured</p>
               </div>
             )}
           </div>

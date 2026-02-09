@@ -11,7 +11,7 @@ interface Props {
   value: number | string;
   severity?: 'critical' | 'high' | 'medium' | 'low';
   trend?: TrendInfo;
-  source?: 'CS' | 'SF' | 'MS' | 'ZS';
+  source?: 'CS' | 'SF' | 'MS' | 'ZS' | 'MK';
   compact?: boolean;
 }
 

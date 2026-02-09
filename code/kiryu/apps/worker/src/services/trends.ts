@@ -37,6 +37,13 @@ export interface ZscalerTrends {
   analyticsTrafficBlocked: TrendData;
 }
 
+export interface MerakiTrends {
+  devicesOnline: TrendData;
+  devicesAlerting: TrendData;
+  vpnOnline: TrendData;
+  uplinksActive: TrendData;
+}
+
 export class TrendService {
   constructor(private env: Env) {}
 
@@ -148,6 +155,39 @@ export class TrendService {
       };
     } catch (error) {
       console.error('Error fetching Zscaler trends:', error);
+      return null;
+    }
+  }
+
+  async getMerakiTrends(periodDays: number): Promise<MerakiTrends | null> {
+    try {
+      const totalDays = periodDays * 2;
+      const rows = await this.env.DB.prepare(`
+        SELECT date, devices_online, devices_alerting, vpn_tunnels_online, uplinks_active
+        FROM meraki_metrics_daily
+        WHERE date >= date('now', '-' || ? || ' days')
+        ORDER BY date ASC
+      `).bind(totalDays).all();
+
+      if (!rows.results || rows.results.length === 0) return null;
+
+      const midpoint = new Date();
+      midpoint.setDate(midpoint.getDate() - periodDays);
+      const midpointStr = midpoint.toISOString().split('T')[0];
+
+      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
+      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+
+      if (current.length === 0) return null;
+
+      return {
+        devicesOnline: this.buildTrend(current, previous, 'devices_online'),
+        devicesAlerting: this.buildTrend(current, previous, 'devices_alerting'),
+        vpnOnline: this.buildTrend(current, previous, 'vpn_tunnels_online'),
+        uplinksActive: this.buildTrend(current, previous, 'uplinks_active'),
+      };
+    } catch (error) {
+      console.error('Error fetching Meraki trends:', error);
       return null;
     }
   }

@@ -5,8 +5,9 @@ import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
 import { ZscalerClient, type ZscalerFullSummary } from '../integrations/zscaler/client';
+import { MerakiClient, type MerakiSummary } from '../integrations/meraki/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
-import { TrendService, type CrowdStrikeTrends, type SalesforceTrends, type ZscalerTrends } from '../services/trends';
+import { TrendService, type CrowdStrikeTrends, type SalesforceTrends, type ZscalerTrends, type MerakiTrends } from '../services/trends';
 
 export const uiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -29,11 +30,13 @@ uiRoutes.get('/', async (c) => {
   let salesforce: TicketMetrics | null = null;
   let microsoft: MicrosoftFullSummary | null = null;
   let zscaler: ZscalerFullSummary | null = null;
+  let meraki: MerakiSummary | null = null;
   let dataSource: 'cache' | 'live' = 'live';
   let cachedAt: string | null = null;
   let csTrends: CrowdStrikeTrends | null = null;
   let sfTrends: SalesforceTrends | null = null;
   let zsTrends: ZscalerTrends | null = null;
+  let mkTrends: MerakiTrends | null = null;
   let platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -192,6 +195,39 @@ uiRoutes.get('/', async (c) => {
     platforms.push({ platform: 'zscaler', status: 'not_configured', last_sync: null });
   }
 
+  // Meraki: try cache first, then live API
+  const mkClient = new MerakiClient(c.env);
+  if (mkClient.isConfigured()) {
+    const mkCacheKey = `${CACHE_KEYS.MERAKI_SUMMARY}:${period}`;
+    fetchPromises.push((async () => {
+      if (!forceRefresh) {
+        const cached = await cache.get<MerakiSummary>(mkCacheKey);
+        if (cached) {
+          meraki = cached.data;
+          if (!cachedAt) cachedAt = cached.cachedAt;
+          platforms.push({ platform: 'meraki', status: 'healthy', last_sync: cached.cachedAt });
+          return;
+        }
+      }
+      try {
+        const result = await withTimeout(mkClient.getSummary(), 25000);
+        if (result) {
+          meraki = result;
+          platforms.push({ platform: 'meraki', status: 'healthy', last_sync: new Date().toISOString() });
+          await cache.set(mkCacheKey, meraki, CACHE_TTL.DASHBOARD_DATA);
+        } else {
+          console.error('Meraki fetch timed out (25s)');
+          platforms.push({ platform: 'meraki', status: 'error', last_sync: null, error_message: 'Request timeout' });
+        }
+      } catch (error) {
+        console.error('Meraki fetch error:', error instanceof Error ? error.message : error);
+        platforms.push({ platform: 'meraki', status: 'error', last_sync: null, error_message: 'Failed to connect' });
+      }
+    })());
+  } else {
+    platforms.push({ platform: 'meraki', status: 'not_configured', last_sync: null });
+  }
+
   // Fetch trend data from D1 (fast, no external API calls)
   fetchPromises.push(
     trendService.getCrowdStrikeTrends(daysBack)
@@ -207,6 +243,11 @@ uiRoutes.get('/', async (c) => {
     trendService.getZscalerTrends(daysBack)
       .then(data => { zsTrends = data; })
       .catch(err => console.error('ZS trend fetch error:', err))
+  );
+  fetchPromises.push(
+    trendService.getMerakiTrends(daysBack)
+      .then(data => { mkTrends = data; })
+      .catch(err => console.error('MK trend fetch error:', err))
   );
 
   // Wait for all fetches to complete (individual timeouts above prevent indefinite hang)
@@ -224,6 +265,7 @@ uiRoutes.get('/', async (c) => {
         salesforce,
         microsoft,
         zscaler,
+        meraki,
         platforms,
         period,
         lastUpdated: new Date().toISOString(),
@@ -232,6 +274,7 @@ uiRoutes.get('/', async (c) => {
         csTrends,
         sfTrends,
         zsTrends,
+        mkTrends,
       }}
     />
   );
