@@ -239,21 +239,21 @@ export class ZscalerAuth {
 
   // --- Base URLs ---
 
+  /** OneAPI unified gateway: all services routed via /zia, /zpa, /zdx prefixes */
+  getOneApiBaseUrl(): string {
+    // All clouds route through the single global gateway.
+    // Cloud routing is determined by the OAuth2 token.
+    return 'https://api.zsapi.net';
+  }
+
+  /** Legacy ZIA base URL (session-based auth) */
   getZiaBaseUrl(): string {
-    if (this.isOneApiConfigured()) {
-      // OneAPI uses the vanity domain
-      const cloud = this.env.ZSCALER_CLOUD;
-      if (cloud) return ZIA_CLOUD_URLS[cloud] ?? `https://zsapi.${cloud}.net`;
-      return 'https://zsapi.zscaler.net';
-    }
-    const cloud = this.env.ZSCALER_ZIA_CLOUD || 'zscaler';
+    const cloud = this.env.ZSCALER_CLOUD || this.env.ZSCALER_ZIA_CLOUD || 'zscaler';
     return ZIA_CLOUD_URLS[cloud] ?? `https://zsapi.${cloud}.net`;
   }
 
+  /** Legacy ZPA base URL (dedicated ZPA token auth) */
   getZpaBaseUrl(): string {
-    if (this.isOneApiConfigured()) {
-      return 'https://config.private.zscaler.com';
-    }
     const cloud = this.env.ZSCALER_ZPA_CLOUD || 'PRODUCTION';
     return ZPA_CLOUD_URLS[cloud] ?? 'https://config.private.zscaler.com';
   }
@@ -261,19 +261,22 @@ export class ZscalerAuth {
   // --- Authenticated fetch helpers ---
 
   async ziaFetch<T>(endpoint: string): Promise<T> {
-    const baseUrl = this.getZiaBaseUrl();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
 
     try {
       let resp: Response;
       if (this.isOneApiConfigured()) {
+        // OneAPI gateway: prefix with /zia
+        const gatewayUrl = this.getOneApiBaseUrl();
         const token = await this.getOneApiToken();
-        resp = await fetch(`${baseUrl}${endpoint}`, {
+        resp = await fetch(`${gatewayUrl}/zia${endpoint}`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           signal: controller.signal,
         });
       } else {
+        // Legacy: session cookie to direct ZIA API
+        const baseUrl = this.getZiaBaseUrl();
         const cookie = await this.getZiaSession();
         resp = await fetch(`${baseUrl}${endpoint}`, {
           headers: { Cookie: cookie, 'Content-Type': 'application/json' },
@@ -293,22 +296,28 @@ export class ZscalerAuth {
   }
 
   async zpaFetch<T>(endpoint: string): Promise<T> {
-    const baseUrl = this.getZpaBaseUrl();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
 
     try {
-      let token: string;
+      let resp: Response;
       if (this.isOneApiConfigured()) {
-        token = await this.getOneApiToken();
+        // OneAPI gateway: prefix with /zpa
+        const gatewayUrl = this.getOneApiBaseUrl();
+        const token = await this.getOneApiToken();
+        resp = await fetch(`${gatewayUrl}/zpa${endpoint}`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        });
       } else {
-        token = await this.getZpaToken();
+        // Legacy: dedicated ZPA token to direct ZPA API
+        const baseUrl = this.getZpaBaseUrl();
+        const token = await this.getZpaToken();
+        resp = await fetch(`${baseUrl}${endpoint}`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        });
       }
-
-      const resp = await fetch(`${baseUrl}${endpoint}`, {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
 
       if (!resp.ok) {
         const text = await resp.text();
@@ -331,22 +340,28 @@ export class ZscalerAuth {
   }
 
   async zdxFetch<T>(endpoint: string): Promise<T> {
-    const baseUrl = this.getZdxBaseUrl();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
 
     try {
-      let token: string;
+      let resp: Response;
       if (this.isOneApiConfigured()) {
-        token = await this.getOneApiToken();
+        // OneAPI gateway: prefix with /zdx
+        const gatewayUrl = this.getOneApiBaseUrl();
+        const token = await this.getOneApiToken();
+        resp = await fetch(`${gatewayUrl}/zdx${endpoint}`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        });
       } else {
-        token = await this.getZdxToken();
+        // Legacy: dedicated ZDX token to direct ZDX API
+        const baseUrl = this.getZdxBaseUrl();
+        const token = await this.getZdxToken();
+        resp = await fetch(`${baseUrl}${endpoint}`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        });
       }
-
-      const resp = await fetch(`${baseUrl}${endpoint}`, {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
 
       if (!resp.ok) {
         const text = await resp.text();
@@ -407,8 +422,7 @@ export class ZscalerAuth {
   }
 
   getAnalyticsBaseUrl(): string {
-    const cloud = this.env.ZSCALER_CLOUD || 'zscaler';
-    return `https://api.${cloud}.zsapi.net/analytics/v1/graphql`;
+    return `${this.getOneApiBaseUrl()}/analytics/v1/graphql`;
   }
 }
 

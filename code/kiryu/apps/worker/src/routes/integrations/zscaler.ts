@@ -321,7 +321,7 @@ zscalerRoutes.get('/analytics', async (c) => {
   try {
     const summary = await client.getAnalyticsSummary();
     if (!summary) {
-      return c.json({ error: 'Analytics endpoint not accessible or returned no data' }, 404);
+      return c.json({ error: 'Analytics not available', message: 'Analytics API returned no data — may require Z-Insights subscription or API role configuration in ZIdentity' }, 404);
     }
     return c.json(summary);
   } catch (error) {
@@ -447,6 +447,7 @@ zscalerRoutes.get('/diagnostic', async (c) => {
     configured: client.isConfigured(),
     auth: { oneApi, legacyZia, legacyZpa, zdx, analytics },
     endpoints: {
+      oneApiGateway: auth.isOneApiConfigured() ? auth.getOneApiBaseUrl() : 'n/a (using legacy)',
       ziaBaseUrl: auth.getZiaBaseUrl(),
       zpaBaseUrl: auth.getZpaBaseUrl(),
     },
