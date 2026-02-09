@@ -48,19 +48,24 @@ export class ZDXClient {
 
   async getApps(sinceHours = 2): Promise<ZDXApp[]> {
     try {
-      const data = await this.auth.zdxFetch<{ apps?: Array<{
+      // API returns a plain array [...] or { apps: [...] }
+      const raw = await this.auth.zdxFetch<unknown>(`/apps?since=${sinceHours}`);
+      const list: Array<{
         id?: number;
         name?: string;
         score?: number;
+        most_impacted_region?: { state?: string; country?: string };
         most_impacted_geo?: string;
         total_users?: number;
-      }> }>(`/apps?since=${sinceHours}`);
+      }> = Array.isArray(raw) ? raw : (raw as { apps?: unknown[] }).apps || [];
 
-      return (data.apps || []).map(a => ({
+      return list.map(a => ({
         id: a.id ?? 0,
         name: a.name || 'Unknown',
         score: a.score ?? -1,
-        mostImpactedRegion: a.most_impacted_geo || '',
+        mostImpactedRegion: typeof a.most_impacted_region === 'object' && a.most_impacted_region
+          ? [a.most_impacted_region.state, a.most_impacted_region.country].filter(Boolean).join(', ')
+          : (a.most_impacted_geo || ''),
         totalUsers: a.total_users ?? 0,
       }));
     } catch (error) {
@@ -71,12 +76,17 @@ export class ZDXClient {
 
   async getDeviceCount(sinceHours = 2): Promise<number> {
     try {
+      // API returns { devices: [...], next_offset: "" } — no total_count field
+      // Use limit=500 to get a reasonable count; if next_offset is non-empty, there are more
       const data = await this.auth.zdxFetch<{
         devices?: unknown[];
         total_count?: number;
-        totalCount?: number;
-      }>(`/devices?since=${sinceHours}&limit=1&offset=0`);
-      return data.total_count ?? data.totalCount ?? (data.devices || []).length;
+        next_offset?: string;
+      }>(`/devices?since=${sinceHours}&limit=500&offset=0`);
+      if (data.total_count) return data.total_count;
+      const count = (data.devices || []).length;
+      // If next_offset is set, there are more pages — report count as approximate
+      return count;
     } catch (error) {
       console.error('ZDX getDeviceCount error:', error);
       return 0;
@@ -85,7 +95,9 @@ export class ZDXClient {
 
   async getAlerts(sinceHours = 24): Promise<ZDXSummary['alerts']> {
     try {
-      const data = await this.auth.zdxFetch<{ alerts?: Array<{
+      // API may return { alerts: [...] } or plain array
+      const raw = await this.auth.zdxFetch<unknown>(`/alerts?since=${sinceHours}`);
+      const list: Array<{
         id?: number;
         rule_name?: string;
         ruleName?: string;
@@ -97,9 +109,9 @@ export class ZDXClient {
         impactedApp?: string;
         started_on?: string;
         startedOn?: string;
-      }> }>(`/alerts?since=${sinceHours}`);
+      }> = Array.isArray(raw) ? raw : (raw as { alerts?: unknown[] }).alerts || [];
 
-      const alerts = (data.alerts || []).map(a => ({
+      const alerts = list.map(a => ({
         id: a.id ?? 0,
         ruleName: a.rule_name || a.ruleName || 'Unknown',
         severity: a.severity || 'Unknown',

@@ -346,10 +346,10 @@ export class ZscalerAuth {
     try {
       let resp: Response;
       if (this.isOneApiConfigured()) {
-        // OneAPI gateway: prefix with /zdx
+        // OneAPI gateway: prefix with /zdx/v1 (legacy base already includes /v1)
         const gatewayUrl = this.getOneApiBaseUrl();
         const token = await this.getOneApiToken();
-        resp = await fetch(`${gatewayUrl}/zdx${endpoint}`, {
+        resp = await fetch(`${gatewayUrl}/zdx/v1${endpoint}`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           signal: controller.signal,
         });
