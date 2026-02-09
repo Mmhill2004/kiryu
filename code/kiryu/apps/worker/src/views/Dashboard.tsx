@@ -958,17 +958,35 @@ export const Dashboard: FC<Props> = ({ data }) => {
           <div id="tab-zdx" class="tab-content">
             {zscaler?.zdx ? (() => {
               const zdx = zscaler.zdx;
+              const sortedApps = [...zdx.apps].sort((a, b) => a.score - b.score);
+              const bestApp = zdx.apps.length > 0 ? [...zdx.apps].sort((a, b) => b.score - a.score)[0]! : null;
+              const goodApps = zdx.apps.filter(a => a.score >= 66);
+              const okayApps = zdx.apps.filter(a => a.score >= 34 && a.score < 66);
+              const poorApps = zdx.apps.filter(a => a.score >= 0 && a.score < 34);
+              const totalUsers = zdx.apps.length > 0 ? Math.max(...zdx.apps.map(a => a.totalUsers)) : 0;
+              const minScore = sortedApps.length > 0 ? Math.round(sortedApps[0]!.score * 10) / 10 : 0;
+              const maxScore = bestApp ? Math.round(bestApp.score * 10) / 10 : 0;
+
+              // Regional breakdown
+              const regionCounts: Record<string, number> = {};
+              for (const app of zdx.apps) {
+                const region = app.mostImpactedRegion || 'Unknown';
+                regionCounts[region] = (regionCounts[region] ?? 0) + 1;
+              }
+
               return (
                 <>
                   {/* Row 1: Key Metrics */}
                   <div class="col-12">
-                    <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                    <div class="metric-grid" style="grid-template-columns: repeat(7, 1fr);">
                       <MetricCard label="Avg Score" value={zdx.averageScore >= 0 ? zdx.averageScore : 'N/A'} source="ZS" compact
                         severity={zdx.averageScore < 34 && zdx.averageScore >= 0 ? 'critical' : zdx.averageScore < 66 && zdx.averageScore >= 0 ? 'medium' : undefined}
                         trend={zsTrends?.zdxAvgScore ? { ...zsTrends.zdxAvgScore, invertColor: true } : undefined} />
-                      <MetricCard label="Category" value={zdx.scoreCategory} compact />
-                      <MetricCard label="Apps Monitored" value={zdx.apps.length} compact />
-                      <MetricCard label="Devices" value={zdx.totalDevices} compact />
+                      <MetricCard label="Category" value={zdx.scoreCategory} compact
+                        severity={zdx.scoreCategory === 'Poor' ? 'critical' : zdx.scoreCategory === 'Okay' ? 'medium' : undefined} />
+                      <MetricCard label="Apps" value={zdx.apps.length} compact />
+                      <MetricCard label="Users" value={totalUsers} compact />
+                      <MetricCard label="Score Range" value={zdx.apps.length > 0 ? `${minScore}–${maxScore}` : 'N/A'} compact />
                       <MetricCard label="Active Alerts" value={zdx.alerts.activeAlerts} compact
                         severity={zdx.alerts.activeAlerts > 0 ? 'high' : undefined}
                         trend={zsTrends?.zdxActiveAlerts ? zsTrends.zdxActiveAlerts : undefined} />
@@ -977,47 +995,102 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
 
-                  {/* Row 2: Lowest Scoring App + App Table */}
-                  {zdx.lowestScoringApp && (
-                    <div class="card card-compact col-4">
-                      <div class="card-title">Lowest Scoring App</div>
-                      <div class="mini-metric-grid">
-                        <MetricCard label="App" value={zdx.lowestScoringApp.name} compact />
-                        <MetricCard label="Score" value={zdx.lowestScoringApp.score} compact
-                          severity={zdx.lowestScoringApp.score < 34 ? 'critical' : zdx.lowestScoringApp.score < 66 ? 'medium' : undefined} />
-                        <MetricCard label="Region" value={zdx.lowestScoringApp.mostImpactedRegion || 'N/A'} compact />
-                        <MetricCard label="Users" value={zdx.lowestScoringApp.totalUsers} compact />
-                      </div>
+                  {/* Row 2: Score Distribution + Best/Worst + Regional Impact */}
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Score Distribution</div>
+                    <div class="mini-metric-grid">
+                      <MetricCard label="Good (66+)" value={goodApps.length} compact severity="low" />
+                      <MetricCard label="Okay (34-65)" value={okayApps.length} compact severity={okayApps.length > 0 ? 'medium' : undefined} />
+                      <MetricCard label="Poor (&lt;34)" value={poorApps.length} compact severity={poorApps.length > 0 ? 'critical' : undefined} />
+                      <MetricCard label="Devices" value={zdx.totalDevices} compact />
                     </div>
-                  )}
+                    {/* Score bar visualization */}
+                    {zdx.apps.length > 0 && (
+                      <div style="margin-top: var(--sp-2); height: 8px; border-radius: 4px; display: flex; overflow: hidden; background: var(--bg-card);">
+                        {goodApps.length > 0 && <div style={`width: ${(goodApps.length / zdx.apps.length) * 100}%; background: var(--success);`} />}
+                        {okayApps.length > 0 && <div style={`width: ${(okayApps.length / zdx.apps.length) * 100}%; background: var(--warning);`} />}
+                        {poorApps.length > 0 && <div style={`width: ${(poorApps.length / zdx.apps.length) * 100}%; background: var(--danger);`} />}
+                      </div>
+                    )}
+                  </div>
 
-                  <div class={`card card-compact ${zdx.lowestScoringApp ? 'col-8' : 'col-12'}`}>
-                    <div class="card-title">App Performance</div>
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Best &amp; Worst</div>
+                    {bestApp && (
+                      <div style="margin-bottom: var(--sp-2);">
+                        <div class="stat-row">
+                          <span class="stat-label" style="color: var(--success);">Best</span>
+                          <span class="stat-value">{Math.round(bestApp.score * 10) / 10}</span>
+                        </div>
+                        <div style="font-size: 0.6rem; color: var(--text-muted); margin-top: 2px;">{bestApp.name} ({bestApp.totalUsers} users)</div>
+                      </div>
+                    )}
+                    {zdx.lowestScoringApp && (
+                      <div>
+                        <div class="stat-row">
+                          <span class="stat-label" style={`color: ${zdx.lowestScoringApp.score < 34 ? 'var(--danger)' : zdx.lowestScoringApp.score < 66 ? 'var(--warning)' : 'var(--text-muted)'};`}>Worst</span>
+                          <span class="stat-value">{Math.round(zdx.lowestScoringApp.score * 10) / 10}</span>
+                        </div>
+                        <div style="font-size: 0.6rem; color: var(--text-muted); margin-top: 2px;">{zdx.lowestScoringApp.name} ({zdx.lowestScoringApp.totalUsers} users)</div>
+                      </div>
+                    )}
+                    {!bestApp && !zdx.lowestScoringApp && <p class="no-data">No app data</p>}
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Most Impacted Regions</div>
+                    {Object.entries(regionCounts).length > 0 ? (
+                      Object.entries(regionCounts)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([region, count]) => (
+                          <div class="stat-row" key={region}>
+                            <span class="stat-label">{region}</span>
+                            <span class="stat-value">{count} app{count !== 1 ? 's' : ''}</span>
+                          </div>
+                        ))
+                    ) : (
+                      <p class="no-data">No region data</p>
+                    )}
+                  </div>
+
+                  {/* Row 3: Full App Performance Table */}
+                  <div class="card card-compact col-12">
+                    <div class="card-title">App Performance ({zdx.apps.length} apps)</div>
                     <table class="compact-table">
                       <thead>
-                        <tr><th>App</th><th>Score</th><th>Region</th><th>Users</th></tr>
+                        <tr><th>App</th><th>Score</th><th style="width: 120px;">Visual</th><th>Most Impacted Region</th><th>Users</th></tr>
                       </thead>
                       <tbody>
-                        {[...zdx.apps].sort((a, b) => a.score - b.score).slice(0, 8).map((app) => (
-                          <tr key={app.id}>
-                            <td>{app.name}</td>
-                            <td>
-                              <span class={`badge ${app.score < 34 ? 'badge-critical' : app.score < 66 ? 'badge-medium' : 'badge-low'}`}>
-                                {app.score >= 0 ? app.score : 'N/A'}
-                              </span>
-                            </td>
-                            <td>{app.mostImpactedRegion || '-'}</td>
-                            <td>{app.totalUsers}</td>
-                          </tr>
-                        ))}
+                        {sortedApps.map((app) => {
+                          const score = Math.round(app.score * 10) / 10;
+                          const barColor = score >= 66 ? 'var(--success)' : score >= 34 ? 'var(--warning)' : 'var(--danger)';
+                          return (
+                            <tr key={app.id}>
+                              <td style="font-weight: 500;">{app.name}</td>
+                              <td>
+                                <span class={`badge ${score < 34 ? 'badge-critical' : score < 66 ? 'badge-medium' : 'badge-low'}`}>
+                                  {score >= 0 ? score : 'N/A'}
+                                </span>
+                              </td>
+                              <td>
+                                <div style="height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden;">
+                                  <div style={`width: ${Math.max(0, Math.min(100, score))}%; height: 100%; border-radius: 3px; background: ${barColor};`} />
+                                </div>
+                              </td>
+                              <td style="font-size: 0.6rem; color: var(--text-muted);">{app.mostImpactedRegion || '-'}</td>
+                              <td>{app.totalUsers}</td>
+                            </tr>
+                          );
+                        })}
                         {zdx.apps.length === 0 && (
-                          <tr><td colSpan={4}><p class="no-data">No monitored apps</p></td></tr>
+                          <tr><td colSpan={5}><p class="no-data">No monitored apps</p></td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Row 3: Alerts */}
+                  {/* Row 4: Alerts */}
                   {zdx.alerts.alerts.length > 0 && (
                     <div class="card card-compact col-12">
                       <div class="card-title">ZDX Alerts</div>
@@ -1026,7 +1099,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                           <tr><th>Severity</th><th>Rule</th><th>App</th><th>Devices</th><th>Status</th></tr>
                         </thead>
                         <tbody>
-                          {zdx.alerts.alerts.slice(0, 8).map((alert) => (
+                          {zdx.alerts.alerts.slice(0, 10).map((alert) => (
                             <tr key={alert.id}>
                               <td>
                                 <span class={`badge ${alert.severity.toLowerCase() === 'critical' ? 'badge-critical' : alert.severity.toLowerCase() === 'warning' ? 'badge-medium' : 'badge-info'}`}>
