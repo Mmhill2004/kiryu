@@ -1313,9 +1313,40 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
 
-                  {/* Row 3: Device Table */}
+                  {/* Row 3: Down Devices */}
+                  {(() => {
+                    const downDevices = meraki.deviceList.filter((dev) => dev.status === 'offline' || dev.status === 'alerting');
+                    if (downDevices.length === 0) return null;
+                    return (
+                      <div class="card card-compact col-12" style="border-left: 3px solid var(--critical);">
+                        <div class="card-title" style="color: var(--critical);">Down Devices ({downDevices.length})</div>
+                        <table class="compact-table">
+                          <thead>
+                            <tr><th>Name</th><th>Model</th><th>Type</th><th>Status</th><th>Public IP</th></tr>
+                          </thead>
+                          <tbody>
+                            {downDevices.map((dev) => (
+                              <tr key={dev.serial}>
+                                <td style="font-weight: 500;">{dev.name}</td>
+                                <td style="font-size: 0.6rem; color: var(--text-muted);">{dev.model}</td>
+                                <td>{dev.productType}</td>
+                                <td>
+                                  <span class={`badge ${dev.status === 'alerting' ? 'badge-critical' : 'badge-high'}`}>
+                                    {dev.status}
+                                  </span>
+                                </td>
+                                <td style="font-size: 0.6rem; color: var(--text-muted);">{dev.publicIp || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Row 4: All Devices Table */}
                   <div class="card card-compact col-12">
-                    <div class="card-title">Devices ({meraki.deviceList.length})</div>
+                    <div class="card-title">All Devices ({meraki.deviceList.length})</div>
                     <table class="compact-table">
                       <thead>
                         <tr><th>Name</th><th>Model</th><th>Type</th><th>Status</th><th>Public IP</th></tr>
