@@ -163,6 +163,8 @@ uiRoutes.get('/', async (c) => {
   }
 
   // Zscaler: try cache first, then live API
+  // Note: Zscaler has multiple sub-modules (ZIA, ZPA, ZDX). If the cache has null
+  // sub-modules that should have data, treat it as a cache miss to avoid showing zeros.
   const zsClient = new ZscalerClient(c.env);
   if (zsClient.isConfigured()) {
     const zsCacheKey = `${CACHE_KEYS.ZSCALER_SUMMARY}:${period}`;
@@ -170,10 +172,18 @@ uiRoutes.get('/', async (c) => {
       if (!forceRefresh) {
         const cached = await cache.get<ZscalerFullSummary>(zsCacheKey);
         if (cached) {
-          zscaler = cached.data;
-          if (!cachedAt) cachedAt = cached.cachedAt;
-          platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: cached.cachedAt });
-          return;
+          const d = cached.data;
+          const isCacheComplete =
+            (!zsClient.isZpaConfigured() || d.zpa !== null) &&
+            (!zsClient.isZdxConfigured() || d.zdx !== null) &&
+            (!zsClient.isZiaConfigured() || d.zia !== null);
+          if (isCacheComplete) {
+            zscaler = d;
+            if (!cachedAt) cachedAt = cached.cachedAt;
+            platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: cached.cachedAt });
+            return;
+          }
+          // Stale cache with missing sub-modules — fall through to live fetch
         }
       }
       try {
@@ -181,7 +191,14 @@ uiRoutes.get('/', async (c) => {
         if (result) {
           zscaler = result;
           platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: new Date().toISOString() });
-          await cache.set(zsCacheKey, zscaler, CACHE_TTL.DASHBOARD_DATA);
+          // Only cache if configured sub-modules returned data (avoid caching partial failures)
+          const hasConfiguredNulls =
+            (zsClient.isZpaConfigured() && !result.zpa) ||
+            (zsClient.isZdxConfigured() && !result.zdx) ||
+            (zsClient.isZiaConfigured() && !result.zia);
+          if (!hasConfiguredNulls) {
+            await cache.set(zsCacheKey, zscaler, CACHE_TTL.DASHBOARD_DATA);
+          }
         } else {
           console.error('Zscaler fetch timed out (25s)');
           platforms.push({ platform: 'zscaler', status: 'error', last_sync: null, error_message: 'Request timeout' });
