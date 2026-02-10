@@ -896,24 +896,55 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
 
-                  {/* Row 3: Analytics (if available) */}
-                  {zscaler?.analytics && (
+                  {/* Row 3: ZINS Analytics (if available) */}
+                  {zscaler?.analytics?.webTraffic && (
                     <div class="card card-compact col-12">
-                      <div class="card-title">Traffic Analytics (24h)</div>
-                      <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
-                        <MetricCard label="Allowed" value={zscaler.analytics.traffic.allowed.toLocaleString()} compact />
-                        <MetricCard label="Blocked" value={zscaler.analytics.traffic.blocked.toLocaleString()} compact severity={zscaler.analytics.traffic.blocked > 0 ? 'high' : undefined} />
-                        <MetricCard label="Cautioned" value={zscaler.analytics.traffic.cautioned.toLocaleString()} compact severity={zscaler.analytics.traffic.cautioned > 0 ? 'medium' : undefined} />
-                        <MetricCard label="Threats" value={zscaler.analytics.threats.total.toLocaleString()} compact severity={zscaler.analytics.threats.total > 0 ? 'critical' : undefined} />
-                        <MetricCard label="Bandwidth" value={`${(zscaler.analytics.traffic.totalBandwidth / (1024 * 1024 * 1024)).toFixed(1)} GB`} compact />
+                      <div class="card-title">Z-Insights Traffic Analytics (7d)</div>
+                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+                        <MetricCard label="Total Transactions" value={zscaler.analytics.webTraffic.totalTransactions.toLocaleString()} compact />
+                        {zscaler.analytics.webTraffic.byLocation.map((loc) => (
+                          <MetricCard key={loc.name} label={loc.name} value={loc.total.toLocaleString()} compact />
+                        ))}
                       </div>
-                      {zscaler.analytics.threats.categories.length > 0 && (
+                      {zscaler.analytics.webTraffic.protocols.length > 0 && (
                         <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
-                          {zscaler.analytics.threats.categories.slice(0, 5).map((t) => (
-                            <span key={t.category} class="badge badge-critical">{t.category}: {t.count}</span>
+                          {zscaler.analytics.webTraffic.protocols.map((p) => (
+                            <span key={p.protocol} class="badge">{p.protocol}: {p.count.toLocaleString()}</span>
                           ))}
                         </div>
                       )}
+                      {zscaler.analytics.webTraffic.threatClasses.length > 0 && (
+                        <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
+                          {zscaler.analytics.webTraffic.threatClasses.map((t) => (
+                            <span key={t.category} class="badge badge-critical">{t.category}: {t.count.toLocaleString()}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {zscaler?.analytics?.cyberSecurity && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">Cyber Security Incidents (7d)</div>
+                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+                        <MetricCard label="Total Incidents" value={zscaler.analytics.cyberSecurity.totalIncidents.toLocaleString()} compact
+                          severity={zscaler.analytics.cyberSecurity.totalIncidents > 100 ? 'high' : zscaler.analytics.cyberSecurity.totalIncidents > 0 ? 'medium' : undefined} />
+                        {zscaler.analytics.cyberSecurity.byCategory.slice(0, 6).map((c) => (
+                          <MetricCard key={c.name} label={c.name.replace(/_/g, ' ')} value={c.total.toLocaleString()} compact
+                            severity={c.name === 'PHISHING' || c.name === 'MALWARE_SITE' ? 'critical' : undefined} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {zscaler?.analytics?.shadowIT && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">Shadow IT Discovery (7d)</div>
+                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+                        <MetricCard label="Apps Discovered" value={String(zscaler.analytics.shadowIT.totalApps)} compact />
+                        {zscaler.analytics.shadowIT.apps.filter(a => a.sanctioned_state !== 'SANCTIONED').slice(0, 4).map((a) => (
+                          <MetricCard key={a.application} label={a.application.replace(/_/g, ' ')} value={`Risk: ${a.risk_index}`} compact
+                            severity={a.risk_index >= 4 ? 'critical' : a.risk_index >= 3 ? 'high' : undefined} />
+                        ))}
+                      </div>
                     </div>
                   )}
 

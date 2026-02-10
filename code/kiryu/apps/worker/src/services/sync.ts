@@ -383,10 +383,10 @@ export class SyncService {
         summary.zdx?.totalDevices ?? 0,
         summary.zdx?.alerts.activeAlerts ?? 0,
         summary.zdx?.alerts.criticalAlerts ?? 0,
-        // Analytics columns
-        summary.analytics?.traffic.allowed ?? 0,
-        summary.analytics?.traffic.blocked ?? 0,
-        summary.analytics?.threats.total ?? 0,
+        // Analytics columns (ZINS)
+        summary.analytics?.webTraffic?.totalTransactions ?? 0,
+        summary.analytics?.webTraffic?.protocols.length ?? 0,
+        summary.analytics?.cyberSecurity?.totalIncidents ?? 0,
         // Enhanced ZIA columns
         summary.zia?.customUrlCategories ?? 0,
         summary.zia?.sandboxEnabled ? 1 : 0,

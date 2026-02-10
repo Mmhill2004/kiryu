@@ -8,7 +8,10 @@ import { AnalyticsClient, type AnalyticsSummary } from './analytics-client';
 export type { ZIASummary } from './zia-client';
 export type { ZPASummary, ZPAConnector, ZPAConnectorGroup } from './zpa-client';
 export type { ZDXSummary, ZDXApp, ZDXAlert } from './zdx-client';
-export type { AnalyticsSummary, TrafficAction, ThreatCategory } from './analytics-client';
+export type {
+  AnalyticsSummary, WebTrafficSummary, CyberSecuritySummary, ShadowITSummary,
+  TrafficAction, ThreatCategory, ProtocolBreakdown, CyberIncidentEntry, ShadowITApp,
+} from './analytics-client';
 
 export interface Risk360Scores {
   overallScore: number;

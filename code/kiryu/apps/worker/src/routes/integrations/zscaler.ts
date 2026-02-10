@@ -332,6 +332,137 @@ zscalerRoutes.get('/analytics', async (c) => {
   }
 });
 
+/**
+ * Run a raw GraphQL query against the ZINS Analytics API (for testing/discovery)
+ */
+zscalerRoutes.post('/analytics/query', async (c) => {
+  const auth = new ZscalerAuth(c.env);
+
+  if (!auth.isOneApiConfigured()) {
+    return c.json({ error: 'OneAPI not configured' }, 503);
+  }
+
+  try {
+    const body = await c.req.json() as { query?: string; variables?: Record<string, unknown> };
+    if (!body.query) {
+      return c.json({ error: 'Missing "query" field in request body' }, 400);
+    }
+
+    const token = await auth.getOneApiToken();
+    const endpoint = auth.getAnalyticsBaseUrl();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: body.query, variables: body.variables ?? {} }),
+        signal: controller.signal,
+      });
+
+      const data = await resp.json();
+      return c.json({ status: resp.status, endpoint, data });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    return c.json({
+      error: 'Failed to execute GraphQL query',
+      message: error instanceof Error ? error.message : String(error),
+    }, 500);
+  }
+});
+
+/**
+ * Introspect the ZINS Analytics GraphQL schema — discover available queries and types
+ */
+zscalerRoutes.get('/analytics/schema', async (c) => {
+  const client = new ZscalerClient(c.env);
+
+  if (!client.isAnalyticsConfigured()) {
+    return c.json({ error: 'Analytics not configured (requires OneAPI)' }, 503);
+  }
+
+  try {
+    const auth = new ZscalerAuth(c.env);
+    const token = await auth.getOneApiToken();
+    const endpoint = auth.getAnalyticsBaseUrl();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+
+    try {
+      const introspectionQuery = `
+        query IntrospectionQuery {
+          __schema {
+            queryType { name }
+            types {
+              name
+              kind
+              fields {
+                name
+                type {
+                  name
+                  kind
+                  ofType { name kind }
+                }
+                args {
+                  name
+                  type { name kind ofType { name kind } }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: introspectionQuery }),
+        signal: controller.signal,
+      });
+
+      const data = await resp.json() as { data?: { __schema?: { queryType?: { name: string }; types?: Array<{ name: string; kind: string; fields?: Array<{ name: string }> }> } }; errors?: unknown[] };
+
+      if (!resp.ok || data.errors) {
+        return c.json({
+          endpoint,
+          status: resp.status,
+          errors: data.errors,
+          message: 'Introspection query failed — the API may not support introspection. Try POST /analytics/query with a specific query.',
+        }, resp.ok ? 200 : resp.status as 400);
+      }
+
+      // Extract user-defined types (filter out GraphQL internal types starting with __)
+      const schema = data.data?.__schema;
+      const userTypes = (schema?.types ?? []).filter(t => !t.name.startsWith('__'));
+
+      return c.json({
+        endpoint,
+        queryType: schema?.queryType?.name,
+        typeCount: userTypes.length,
+        types: userTypes,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    return c.json({
+      error: 'Failed to introspect schema',
+      message: error instanceof Error ? error.message : String(error),
+    }, 500);
+  }
+});
+
 // ============================================
 // DIAGNOSTIC ENDPOINT
 // ============================================

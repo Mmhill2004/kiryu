@@ -422,7 +422,7 @@ export class ZscalerAuth {
   }
 
   getAnalyticsBaseUrl(): string {
-    return `${this.getOneApiBaseUrl()}/analytics/v1/graphql`;
+    return `${this.getOneApiBaseUrl()}/zins/graphql`;
   }
 }
 
