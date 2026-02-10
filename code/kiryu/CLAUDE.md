@@ -39,9 +39,9 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 | **Salesforce** | ✅ Active | Service desk: MTTR, SLA, backlog aging, agent workload |
 | **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
 | **Meraki** | ✅ Active | Network infrastructure: Device statuses, VPN tunnels, Uplinks, Licensing. Static API key auth (no OAuth). |
-| **Abnormal** | ⚪ Stubbed | Client ready, needs credentials |
-| **Zscaler** | ⚪ Stubbed | Client ready, needs credentials |
-| **Cloudflare** | ⚪ Stubbed | Access/Gateway logs, needs API token |
+| **Abnormal** | ✅ Active | Email threats, cases, stats. Bearer token auth. |
+| **Zscaler** | ✅ Active | ZIA, ZPA, ZDX, Analytics, Risk360. Supports OneAPI + legacy credentials. |
+| **Cloudflare** | ✅ Active | Access logs, Gateway logs, Security events, Access apps. Bearer token auth. |
 
 ## Tech Stack
 
@@ -53,7 +53,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 28 tools
+- **AI Integration**: MCP server with 35 tools
 
 ## Common Commands
 
@@ -75,6 +75,11 @@ wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0007_m
 
 # Add secrets
 wrangler secret put SECRET_NAME --name security-dashboard-api
+
+# Additional useful scripts
+cd apps/worker && npx wrangler deploy --env staging src/index.ts  # Deploy to staging
+cd apps/worker && npx wrangler types                              # Regenerate CF binding types
+pnpm test                                                         # Run tests (vitest)
 ```
 
 ## Project Structure
@@ -100,9 +105,9 @@ kiryu/
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
 │   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations, Risky Users, Incidents, Machines
 │   │   ├── meraki/client.ts       # Full: Device statuses, VPN tunnels, Uplinks, Licensing
-│   │   ├── abnormal/client.ts     # Stubbed
-│   │   ├── zscaler/client.ts      # Stubbed
-│   │   └── cloudflare/client.ts   # Stubbed
+│   │   ├── abnormal/client.ts     # Full: Threats, Cases, Stats
+│   │   ├── zscaler/              # Full: 6 files (client.ts, auth.ts, zia-client.ts, zpa-client.ts, zdx-client.ts, analytics-client.ts)
+│   │   └── cloudflare/client.ts   # Full: Access logs, Gateway logs, Security events
 │   ├── services/
 │   │   ├── sync.ts           # Background sync + D1 snapshots + 90-day retention
 │   │   ├── cache.ts          # KV cache utility with typed get/set/invalidate
@@ -111,7 +116,7 @@ kiryu/
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
 ├── packages/db/migrations/   # D1 SQL migrations (7 files)
-└── mcp-servers/security-dashboard/  # MCP server (28 tools)
+└── mcp-servers/security-dashboard/  # MCP server (35 tools)
 ```
 
 ## Key Files
@@ -123,6 +128,9 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **Microsoft** — 8 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
+- **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores cached in KV. `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics, Risk360 data.
+- **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
+- **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
@@ -141,17 +149,20 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 
 - `GET /` — Dashboard UI (KV-cached, `?period=7d`, `?refresh=true`)
 - `GET /health` — Health check (public, not behind Zero Trust)
-- `GET /api/dashboard/{summary,platforms/status,trends,tickets/metrics,executive-summary}` — Dashboard data APIs
+- `GET /api/dashboard/{summary,platforms/status,trends,threats/timeline,incidents/recent,tickets/metrics,executive-summary}` — Dashboard data APIs
 - `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
 - `GET /api/integrations/microsoft/{summary,alerts,defender/alerts,secure-score,recommendations,compliance}` — Microsoft (identity/incidents/machines only via `/summary`)
 - `GET /api/integrations/salesforce/{metrics,tickets,open,mttr,workload}` — Salesforce
 - `GET /api/integrations/meraki/{test,summary,devices,networks,vpn,uplinks}` — Meraki
+- `GET /api/integrations/zscaler/{test,summary,zia,zpa,zpa/connectors,zdx,zdx/apps,zdx/alerts,analytics,risk360,diagnostic}` — Zscaler (`POST risk360` to set scores)
+- `GET /api/integrations/abnormal/{threats,stats,cases}` — Abnormal
+- `GET /api/integrations/cloudflare/{access/logs,gateway/logs,security/events,stats,access/apps}` — Cloudflare
 - `GET /api/reports`, `GET /api/reports/latest`, `GET /api/reports/:yearMonth`, `POST /api/reports/generate` — Reports
 - `POST /api/v1/sync/{all,:platform}`, `GET /api/v1/sync/{status,history}` — Sync (API key required)
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 28 tools covering all platforms. See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 35 tools covering all platforms (including Zscaler-specific tools: summary, zia, zpa, zdx, analytics, risk360, diagnostic). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -198,13 +209,35 @@ DASHBOARD_API_KEY
 CROWDSTRIKE_BASE_URL         # Region override (default: https://api.crowdstrike.com)
 AZURE_SUBSCRIPTION_ID        # Scope Cloud Defender recommendations to a subscription
 ABNORMAL_API_TOKEN
-ZSCALER_API_KEY
-ZSCALER_API_SECRET
+ABNORMAL_BASE_URL            # Base URL override
+
+# Zscaler — supports OneAPI (preferred) or legacy per-module credentials
+ZSCALER_CLIENT_ID            # OneAPI client ID
+ZSCALER_CLIENT_SECRET        # OneAPI client secret
+ZSCALER_VANITY_DOMAIN        # OneAPI vanity domain
+ZSCALER_CLOUD                # OneAPI cloud (e.g., zscaler.net)
+ZSCALER_ZPA_CUSTOMER_ID      # ZPA customer ID (needed for both OneAPI and legacy)
+# Legacy ZIA credentials (fallback if OneAPI not configured)
+ZSCALER_ZIA_USERNAME
+ZSCALER_ZIA_PASSWORD
+ZSCALER_ZIA_API_KEY
+ZSCALER_ZIA_CLOUD
+# Legacy ZPA credentials (fallback if OneAPI not configured)
+ZSCALER_ZPA_CLIENT_ID
+ZSCALER_ZPA_CLIENT_SECRET
+ZSCALER_ZPA_CLOUD
+# ZDX credentials
+ZDX_API_KEY_ID
+ZDX_API_SECRET
+ZDX_CLOUD
+
 MERAKI_API_KEY               # Meraki Dashboard API key
 MERAKI_ORG_ID                # Meraki Organization ID
 MERAKI_BASE_URL              # Region override (default: https://api.meraki.com/api/v1)
+
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_ZONE_ID           # Zone ID for security events
 ```
 
 ## TypeScript
@@ -223,8 +256,7 @@ Key type patterns:
 - `ContentfulStatusCode` (from `hono/utils/http-status`) for `ApiError.statusCode` — Hono's `c.json()` rejects 1xx codes
 - `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
 - Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
-- Stubbed integration credentials (`ABNORMAL_API_TOKEN`) are typed as required `string` in `Env` but are never set — clients guard with `isConfigured()` at runtime
-- Meraki/Zscaler/Cloudflare credentials are typed as optional `string?` in `Env` — clients check with `isConfigured()`
+- All optional integration credentials (Abnormal, Zscaler, Meraki, Cloudflare) are typed as optional `string?` in `Env` — clients check with `isConfigured()`
 
 ## Performance & Stability
 
