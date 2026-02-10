@@ -40,7 +40,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 | **Microsoft** | ✅ Active | Entra alerts, Defender for Endpoint, Secure Score, Cloud Defender, Device Compliance, Risky Users, Incidents, Machines |
 | **Meraki** | ✅ Active | Network infrastructure: Device statuses, VPN tunnels, Uplinks, Licensing. Static API key auth (no OAuth). |
 | **Abnormal** | ✅ Active | Email threats, cases, stats. Bearer token auth. |
-| **Zscaler** | ✅ Active | ZIA, ZPA, ZDX, Z-Insights (ZINS GraphQL: web traffic, cyber security, shadow IT), Risk360. OneAPI via ZIdentity OAuth2. |
+| **Zscaler** | ✅ Active | ZIA, ZPA, ZDX, Z-Insights (ZINS GraphQL: web traffic, cyber security, shadow IT). Risk360 manual only (no API). OneAPI via ZIdentity OAuth2. |
 | **Cloudflare** | ✅ Active | Access logs, Gateway logs, Security events, Access apps. Bearer token auth. |
 
 ## Tech Stack
@@ -128,8 +128,9 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **Microsoft** — 8 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
-- **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores cached in KV. `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data.
+- **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data.
   - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler.
+  - **Risk360 / ZRA** — No public API exists (as of Feb 2026). The `RISK_SCORE` type exists in the ZINS GraphQL schema but is not exposed as a queryable root field (confirmed by Zscaler SDK PR #443). REST paths under `/zra/` and `/risk360/` on the OneAPI gateway return 401 — no service is registered. Risk360 scores must be entered manually via `POST /api/integrations/zscaler/risk360` and are stored in KV. Monitor the ZIdentity admin portal (API Resources) and Zscaler SDK releases for future API availability.
 - **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
 - **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
@@ -388,6 +389,9 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### Zscaler ZINS Analytics returns no data
 -> The ZINS GraphQL API uses UPPERCASE root fields (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`) and epoch millisecond timestamps. CYBER_SECURITY requires exactly 7 or 14-day intervals with end_time at least 1 day before now. IOT returns 403 if not provisioned. FIREWALL is not in the schema. Use `POST /api/integrations/zscaler/analytics/query` to test raw GraphQL queries. Introspection is disabled by Zscaler.
+
+### Zscaler Risk360 / ZRA returns "Permission Denied" or 401
+-> Risk360 does not have a public API (as of Feb 2026). The ZINS `RISK_SCORE` GraphQL type exists but is not queryable — the Zscaler SDK team confirmed it was "incorrectly created for GraphQL types not exposed in the root Query" (PR #443). REST paths `/zra/` and `/risk360/` are not registered on the OneAPI gateway. Use the manual KV approach: `POST /api/integrations/zscaler/risk360` to set scores.
 
 ### Zscaler cached token doesn't reflect new permissions
 -> OneAPI tokens are cached in KV for 55 minutes (`zscaler:oneapi:token`). After changing API client scopes in ZIdentity, flush the cached token: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=<KV_ID> --remote`
