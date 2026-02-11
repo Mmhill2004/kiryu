@@ -48,6 +48,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Runtime**: Cloudflare Workers
 - **Framework**: Hono (API + JSX views)
 - **Interactivity**: htmx
+- **Typography**: Outfit (UI) + JetBrains Mono (data values)
 - **Database**: Cloudflare D1 (SQLite)
 - **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth, 58 min per-scope MS OAuth)
 - **Storage**: Cloudflare R2 (monthly executive reports)
@@ -92,7 +93,7 @@ kiryu/
 │   │   ├── Layout.tsx        # Base HTML + all CSS
 │   │   ├── Dashboard.tsx     # Main dashboard with trends + cache indicator
 │   │   ├── ReportTemplate.tsx # Self-contained HTML monthly report
-│   │   └── components/       # MetricCard, SecurityScore, ThreatChart, etc.
+│   │   └── components/       # MetricCard, GaugeChart, DonutChart, SecurityScore, ThreatChart
 │   ├── routes/
 │   │   ├── ui.tsx            # Dashboard HTML route (/) with KV cache
 │   │   ├── dashboard.ts      # Dashboard API (summary, trends, executive-summary)
@@ -142,11 +143,14 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 
 ### Views
 - **Dashboard.tsx** — Main dashboard with 9 tabs: Executive, CrowdStrike, Microsoft, Salesforce, ZIA, ZPA, ZDX, ZINS, Meraki. Executive tab is the default active tab.
-  - **Executive tab** — CEO-friendly cross-platform overview: 4 headline KPIs (Security Score, Active Threats, Compliance Rate, Network Uptime), 5 health indicator gauges (Asset Health, Active Threats, Compliance Posture, Connectivity, Service Delivery) aggregating metrics across CS/MS/SF/ZS/MK, 6 platform summary cards, and auto-generated action items from threshold checks.
+  - **Top KPI strip** — 5 actionable metrics (Critical Alerts, Open Incidents, Risky Users, Open Cases, SLA). Informational metrics (Secure Score, Endpoints, ZDX Score) live in platform tabs, not the top bar.
+  - **Platform status row** — Horizontal badges below KPI strip showing connected platforms with health dots (green/red/gray).
+  - **Executive tab** — CEO-friendly cross-platform overview: 3 headline gauges (Security Score, Compliance, Network Uptime), 5 health indicator gauges (Asset Health, Threat Posture, Compliance Posture, Connectivity, Service Delivery) aggregating metrics across CS/MS/SF/ZS/MK, 6 platform summary cards, and auto-generated action items from threshold checks.
   - **ZINS tab** — Dedicated Z-Insights analytics: DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
+- **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
-- **Layout.tsx** — Base HTML shell with all CSS. Includes executive-specific styles (`.exec-headline`, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), and `.sr-only` utility for screen-reader-only text. Tab JS manages `aria-selected` state.
+- **Layout.tsx** — Base HTML shell with all CSS. Uses Outfit (sans) + JetBrains Mono (data values) fonts. Includes executive-specific styles (`.exec-headline` 3-col, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), platform status row (`.platform-status-row`), and `.sr-only` utility. Tab JS manages `aria-selected` state.
 
 ## API Routes
 
@@ -424,8 +428,11 @@ cd apps/worker && npx wrangler deploy src/index.ts
 ### Zscaler Risk360 / ZRA returns "Permission Denied" or 401
 -> Risk360 does not have a public API (as of Feb 2026). The ZINS `RISK_SCORE` GraphQL type exists but is not queryable — the Zscaler SDK team confirmed it was "incorrectly created for GraphQL types not exposed in the root Query" (PR #443). REST paths `/zra/` and `/risk360/` are not registered on the OneAPI gateway. Use the manual KV approach: `POST /api/integrations/zscaler/risk360` to set scores.
 
+### Zscaler ZIA/ZPA/ZINS suddenly return 401 after working previously
+-> The cached OneAPI token in KV may have been invalidated server-side (Zscaler token rotation, maintenance). Flush it: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=445b6afd3f1044bb9b84c22e32db3f5c --remote`. Use `/api/integrations/zscaler/diagnostic` to verify — the `apiProbe` section tests actual ZIA/ZPA API calls (not just token fetch). If flushing fixes it, the issue was a stale cached token.
+
 ### Zscaler cached token doesn't reflect new permissions
--> OneAPI tokens are cached in KV for 55 minutes (`zscaler:oneapi:token`). After changing API client scopes in ZIdentity, flush the cached token: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=<KV_ID> --remote`
+-> OneAPI tokens are cached in KV for 55 minutes (`zscaler:oneapi:token`). After changing API client scopes in ZIdentity, flush the cached token: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=445b6afd3f1044bb9b84c22e32db3f5c --remote`
 
 ### Deploy fails with "No project was selected"
 -> Run from `apps/worker/` directory: `npx wrangler deploy src/index.ts` (not `pnpm deploy` from root)
