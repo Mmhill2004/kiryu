@@ -11,6 +11,13 @@ interface Props {
   centerLabel?: string;
 }
 
+function compact(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
 export const DonutChart: FC<Props> = ({ segments, centerLabel }) => {
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   if (total === 0) {
@@ -47,7 +54,7 @@ export const DonutChart: FC<Props> = ({ segments, centerLabel }) => {
           ))}
         </svg>
         <div class="donut-center">
-          <span class="donut-total">{total}</span>
+          <span class="donut-total">{compact(total)}</span>
           {centerLabel && <span class="donut-total-label">{centerLabel}</span>}
         </div>
       </div>
@@ -55,7 +62,7 @@ export const DonutChart: FC<Props> = ({ segments, centerLabel }) => {
         {segments.filter(s => s.value > 0).map((seg) => (
           <span class="donut-legend-item" key={seg.label}>
             <span class="donut-legend-dot" style={`background: ${seg.color}`} />
-            {seg.label}: <span class="donut-legend-value">{seg.value}</span>
+            {seg.label}: <span class="donut-legend-value">{compact(seg.value)}</span>
           </span>
         ))}
       </div>

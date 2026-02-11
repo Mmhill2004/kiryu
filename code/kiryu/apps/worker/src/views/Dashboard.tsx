@@ -1,6 +1,5 @@
 import type { FC } from 'hono/jsx';
 import { Layout } from './Layout';
-import { SecurityScore } from './components/SecurityScore';
 import { MetricCard } from './components/MetricCard';
 import { ThreatChart } from './components/ThreatChart';
 import { GaugeChart } from './components/GaugeChart';
@@ -143,7 +142,7 @@ function calculateHealthIndicators(
       metrics.push({ name: 'Cyber Incidents', value: formatCompact(incidents), source: 'ZS', severity: incidents > 50 ? 'high' : incidents > 0 ? 'medium' : undefined });
     }
     const score = Math.round(100 * Math.max(0, 1 - Math.log10(1 + threatWeight) / 2.5));
-    indicators.push({ score, label: 'Active Threats', metrics });
+    indicators.push({ score, label: 'Threat Posture', metrics });
   }
 
   // 3. Compliance Posture
@@ -401,118 +400,62 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
         </header>
 
-        {/* ═══ COMMAND BAR ═══ */}
+        {/* ═══ KPI STRIP ═══ */}
         <div class="dashboard-top">
-          <div class="command-bar">
-            {/* Security Score Ring */}
-            <div class="command-bar-score">
-              {securityScore !== null ? (
-                <SecurityScore score={securityScore} />
-              ) : (
-                <div style="width: 90px; height: 90px; display: flex; align-items: center; justify-content: center;">
-                  <span class="stat-label" style="font-size: 0.6rem;">N/A</span>
+          <div class="kpi-strip">
+            {criticalAlerts > 0 && (
+              <div class="kpi-item kpi-pulse">
+                <div class="kpi-value severity-critical">{criticalAlerts}</div>
+                <div class="kpi-label">Critical Alerts</div>
+                <div class="kpi-source">CS+MS</div>
+              </div>
+            )}
+
+            {openIncidents > 0 && (
+              <div class="kpi-item">
+                <div class="kpi-value severity-high">{openIncidents}</div>
+                <div class="kpi-label">Open Incidents</div>
+                <div class="kpi-source">CS+MS</div>
+              </div>
+            )}
+
+            {riskyUsers > 0 && (
+              <div class="kpi-item kpi-pulse">
+                <div class="kpi-value severity-critical">{riskyUsers}</div>
+                <div class="kpi-label">Risky Users</div>
+                <div class="kpi-source">MS</div>
+              </div>
+            )}
+
+            {salesforce && (
+              <div class="kpi-item">
+                <div class={`kpi-value ${salesforce.openTickets > 20 ? 'severity-critical' : salesforce.openTickets > 10 ? 'severity-medium' : ''}`}>
+                  {salesforce.openTickets}
                 </div>
-              )}
-            </div>
-
-            {/* Cross-Platform KPIs */}
-            <div class="command-bar-kpis">
-              <div class="kpi-strip">
-                {crowdstrike?.crowdScore && (
-                  <div class="kpi-item">
-                    <div class={`kpi-value ${crowdstrike.crowdScore.current > 70 ? 'severity-critical' : crowdstrike.crowdScore.current > 40 ? 'severity-medium' : ''}`}>
-                      {crowdstrike.crowdScore.current}
-                    </div>
-                    <div class="kpi-label">CrowdScore</div>
-                    <div class="kpi-source">CS</div>
-                  </div>
-                )}
-
-                {microsoft?.secureScore && microsoft.secureScore.maxScore > 0 && (
-                  <div class="kpi-item">
-                    <div class={`kpi-value ${((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100) < 50 ? 'severity-critical' : ((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100) < 80 ? 'severity-medium' : ''}`}>
-                      {((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100).toFixed(0)}%
-                    </div>
-                    <div class="kpi-label">Secure Score</div>
-                    <div class="kpi-source">MS</div>
-                  </div>
-                )}
-
-                {criticalAlerts > 0 && (
-                  <div class="kpi-item kpi-pulse">
-                    <div class="kpi-value severity-critical">{criticalAlerts}</div>
-                    <div class="kpi-label">Critical Alerts</div>
-                    <div class="kpi-source">CS+MS</div>
-                  </div>
-                )}
-
-                {openIncidents > 0 && (
-                  <div class="kpi-item">
-                    <div class="kpi-value severity-high">{openIncidents}</div>
-                    <div class="kpi-label">Open Incidents</div>
-                    <div class="kpi-source">CS+MS</div>
-                  </div>
-                )}
-
-                {riskyUsers > 0 && (
-                  <div class="kpi-item kpi-pulse">
-                    <div class="kpi-value severity-critical">{riskyUsers}</div>
-                    <div class="kpi-label">Risky Users</div>
-                    <div class="kpi-source">MS</div>
-                  </div>
-                )}
-
-                {salesforce && (
-                  <div class="kpi-item">
-                    <div class={`kpi-value ${salesforce.openTickets > 20 ? 'severity-critical' : salesforce.openTickets > 10 ? 'severity-medium' : ''}`}>
-                      {salesforce.openTickets}
-                    </div>
-                    <div class="kpi-label">Open Cases</div>
-                    <div class="kpi-source">SF</div>
-                  </div>
-                )}
-
-                {salesforce && (
-                  <div class="kpi-item">
-                    <div class={`kpi-value ${salesforce.slaComplianceRate < 90 ? 'severity-critical' : salesforce.slaComplianceRate < 95 ? 'severity-medium' : ''}`}>
-                      {salesforce.slaComplianceRate.toFixed(0)}%
-                    </div>
-                    <div class="kpi-label">SLA</div>
-                    <div class="kpi-source">SF</div>
-                  </div>
-                )}
-
-                {microsoft && (
-                  <div class="kpi-item">
-                    <div class="kpi-value">{microsoft.machines.total}</div>
-                    <div class="kpi-label">Endpoints</div>
-                    <div class="kpi-source">MS</div>
-                  </div>
-                )}
-
-                {zscaler?.zdx && zscaler.zdx.averageScore >= 0 && (
-                  <div class="kpi-item">
-                    <div class={`kpi-value ${zscaler.zdx.averageScore < 34 ? 'severity-critical' : zscaler.zdx.averageScore < 66 ? 'severity-medium' : ''}`}>
-                      {zscaler.zdx.averageScore}
-                    </div>
-                    <div class="kpi-label">ZDX Score</div>
-                    <div class="kpi-source">ZS</div>
-                  </div>
-                )}
+                <div class="kpi-label">Open Cases</div>
+                <div class="kpi-source">SF</div>
               </div>
-            </div>
+            )}
 
-            {/* Platform Status Badges */}
-            <div class="command-bar-status">
-              <div class="platform-badges">
-                {platforms.filter((p) => p.status !== 'not_configured').map((p) => (
-                  <span class="platform-badge" key={p.platform}>
-                    <span class={`status-dot status-${p.status}`} />
-                    {p.platform}
-                  </span>
-                ))}
+            {salesforce && (
+              <div class="kpi-item">
+                <div class={`kpi-value ${salesforce.slaComplianceRate < 90 ? 'severity-critical' : salesforce.slaComplianceRate < 95 ? 'severity-medium' : ''}`}>
+                  {salesforce.slaComplianceRate.toFixed(0)}%
+                </div>
+                <div class="kpi-label">SLA</div>
+                <div class="kpi-source">SF</div>
               </div>
-            </div>
+            )}
+          </div>
+
+          {/* Platform Status — horizontal row below metrics */}
+          <div class="platform-status-row">
+            {platforms.filter((p) => p.status !== 'not_configured').map((p) => (
+              <span class="platform-badge" key={p.platform}>
+                <span class={`status-dot status-${p.status}`} />
+                {p.platform}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -537,18 +480,6 @@ export const Dashboard: FC<Props> = ({ data }) => {
               <div class="exec-headline">
                 <div class="exec-headline-card">
                   <GaugeChart value={securityScore ?? 0} label="Security Score" sublabel={securityScore !== null ? (securityScore >= 80 ? 'Good' : securityScore >= 50 ? 'Fair' : 'Critical') : 'N/A'} />
-                </div>
-                <div class="exec-headline-card">
-                  <div class={`exec-big-value ${criticalAlerts > 5 ? 'severity-critical' : criticalAlerts > 0 ? 'severity-high' : ''}`}>
-                    {criticalAlerts}
-                  </div>
-                  <div class="exec-label">Active Threats</div>
-                  <div class="exec-sublabel">
-                    {crowdstrike ? `CS: ${crowdstrike.alerts.bySeverity.critical}` : ''}
-                    {crowdstrike && microsoft ? ' | ' : ''}
-                    {microsoft ? `MS: ${microsoft.alertAnalytics.bySeverity.high + microsoft.defenderAnalytics.bySeverity.high}` : ''}
-                    {zscaler?.analytics?.cyberSecurity ? ` | ZS: ${formatCompact(zscaler.analytics.cyberSecurity.totalIncidents)}` : ''}
-                  </div>
                 </div>
                 <div class="exec-headline-card">
                   <GaugeChart value={complianceAvg} label="Compliance" sublabel={complianceAvg >= 80 ? 'On Track' : complianceAvg >= 50 ? 'Needs Work' : 'At Risk'} />
