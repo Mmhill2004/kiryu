@@ -193,9 +193,9 @@ uiRoutes.get('/', async (c) => {
           platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: new Date().toISOString() });
           // Only cache if configured sub-modules returned data (avoid caching partial failures)
           const hasConfiguredNulls =
-            (zsClient.isZpaConfigured() && !result.zpa) ||
-            (zsClient.isZdxConfigured() && !result.zdx) ||
-            (zsClient.isZiaConfigured() && !result.zia);
+            (zsClient.isZpaConfigured() && result.zpa === null) ||
+            (zsClient.isZdxConfigured() && result.zdx === null) ||
+            (zsClient.isZiaConfigured() && result.zia === null);
           if (!hasConfiguredNulls) {
             await cache.set(zsCacheKey, zscaler, CACHE_TTL.DASHBOARD_DATA);
           }

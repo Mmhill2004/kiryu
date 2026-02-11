@@ -9,6 +9,11 @@ export const cloudflareRoutes = new Hono<{ Bindings: Env }>();
  */
 cloudflareRoutes.get('/access/logs', async (c) => {
   const client = new CloudflareClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ configured: false, error: 'Cloudflare not configured' }, 503);
+  }
+
   const since = c.req.query('since');
 
   try {
@@ -30,6 +35,11 @@ cloudflareRoutes.get('/access/logs', async (c) => {
  */
 cloudflareRoutes.get('/gateway/logs', async (c) => {
   const client = new CloudflareClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ configured: false, error: 'Cloudflare not configured' }, 503);
+  }
+
   const since = c.req.query('since');
 
   try {
@@ -51,6 +61,11 @@ cloudflareRoutes.get('/gateway/logs', async (c) => {
  */
 cloudflareRoutes.get('/security/events', async (c) => {
   const client = new CloudflareClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ configured: false, error: 'Cloudflare not configured' }, 503);
+  }
+
   const zoneId = c.req.query('zone_id');
 
   try {
@@ -73,6 +88,10 @@ cloudflareRoutes.get('/security/events', async (c) => {
 cloudflareRoutes.get('/stats', async (c) => {
   const client = new CloudflareClient(c.env);
 
+  if (!client.isConfigured()) {
+    return c.json({ configured: false, error: 'Cloudflare not configured' }, 503);
+  }
+
   try {
     const stats = await client.getStats();
     return c.json(stats);
@@ -89,6 +108,10 @@ cloudflareRoutes.get('/stats', async (c) => {
  */
 cloudflareRoutes.get('/access/apps', async (c) => {
   const client = new CloudflareClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ configured: false, error: 'Cloudflare not configured' }, 503);
+  }
 
   try {
     const apps = await client.getAccessApps();

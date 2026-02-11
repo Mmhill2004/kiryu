@@ -37,31 +37,43 @@ export class CloudflareClient {
 
   constructor(private env: Env) {}
 
+  isConfigured(): boolean {
+    return !!this.env.CLOUDFLARE_API_TOKEN;
+  }
+
   /**
    * Make authenticated API request to Cloudflare
    */
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Cloudflare API error: ${response.status} ${error}`);
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Cloudflare API error: ${response.status} ${error}`);
+      }
+
+      const data = await response.json() as { success: boolean; result: T; errors?: Array<{ message: string }> };
+
+      if (!data.success) {
+        throw new Error(`Cloudflare API error: ${data.errors?.[0]?.message || 'Unknown error'}`);
+      }
+
+      return data.result;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await response.json() as { success: boolean; result: T; errors?: Array<{ message: string }> };
-
-    if (!data.success) {
-      throw new Error(`Cloudflare API error: ${data.errors?.[0]?.message || 'Unknown error'}`);
-    }
-
-    return data.result;
   }
 
   /**
@@ -100,13 +112,13 @@ export class CloudflareClient {
     const sinceDate = since || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     try {
-      // Gateway logs via GraphQL Analytics API
+      // Gateway logs via GraphQL Analytics API — use variables to prevent injection
       const query = `
-        query {
+        query GatewayLogs($accountTag: string!, $since: Time!) {
           viewer {
-            accounts(filter: {accountTag: "${accountId}"}) {
+            accounts(filter: {accountTag: $accountTag}) {
               gatewayResolverLogs(
-                filter: {datetime_gt: "${sinceDate}"}
+                filter: {datetime_gt: $since}
                 limit: 100
                 orderBy: [datetime_DESC]
               ) {
@@ -123,27 +135,56 @@ export class CloudflareClient {
         }
       `;
 
-      const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
-      const data = await response.json() as any;
-      const logs = data?.data?.viewer?.accounts?.[0]?.gatewayResolverLogs || [];
+      try {
+        const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query,
+            variables: { accountTag: accountId, since: sinceDate },
+          }),
+        });
 
-      return logs.map((log: any) => ({
-        datetime: log.datetime,
-        user_email: log.userEmail,
-        action: log.action,
-        hostname: log.queryName,
-        policy_name: log.policyName,
-        categories: log.categories || [],
-        location: log.location,
-      }));
+        interface GatewayGraphQLResponse {
+          data?: {
+            viewer?: {
+              accounts?: Array<{
+                gatewayResolverLogs?: Array<{
+                  datetime: string;
+                  userEmail: string;
+                  action: string;
+                  queryName: string;
+                  policyName: string;
+                  categories: string[];
+                  location: string;
+                }>;
+              }>;
+            };
+          };
+        }
+
+        const data = await response.json() as GatewayGraphQLResponse;
+        const logs = data?.data?.viewer?.accounts?.[0]?.gatewayResolverLogs ?? [];
+
+        return logs.map((log) => ({
+          datetime: log.datetime,
+          user_email: log.userEmail,
+          action: log.action,
+          hostname: log.queryName,
+          policy_name: log.policyName,
+          categories: log.categories || [],
+          location: log.location,
+        }));
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch (error) {
       console.error('Error fetching Gateway logs:', error);
       return [];
@@ -161,10 +202,10 @@ export class CloudflareClient {
     }
 
     try {
-      const events = await this.request<{ result: SecurityEvent[] }>(
+      const events = await this.request<SecurityEvent[]>(
         `/zones/${zone}/security/events?per_page=100`
       );
-      return (events as any)?.result || [];
+      return events || [];
     } catch (error) {
       console.error('Error fetching security events:', error);
       return [];
@@ -213,7 +254,7 @@ export class CloudflareClient {
         blocked++;
       }
       if (log.country) {
-        byCountry[log.country] = (byCountry[log.country] || 0) + 1;
+        byCountry[log.country] = (byCountry[log.country] ?? 0) + 1;
       }
     }
 

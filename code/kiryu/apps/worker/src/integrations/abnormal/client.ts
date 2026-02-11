@@ -26,25 +26,37 @@ export class AbnormalClient {
     this.baseUrl = env.ABNORMAL_BASE_URL || 'https://api.abnormalsecurity.com/v1';
   }
 
+  isConfigured(): boolean {
+    return !!this.env.ABNORMAL_API_TOKEN;
+  }
+
   /**
    * Make authenticated API request
    */
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${this.env.ABNORMAL_API_TOKEN}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Abnormal API error: ${response.status} ${error}`);
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${this.env.ABNORMAL_API_TOKEN}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Abnormal API error: ${response.status} ${error}`);
+      }
+
+      return response.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json() as Promise<T>;
   }
 
   /**

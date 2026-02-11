@@ -57,16 +57,16 @@ export class TrendService {
         FROM crowdstrike_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
-      `).bind(totalDays).all();
+      `).bind(totalDays).all<Record<string, unknown>>();
 
       if (!rows.results || rows.results.length === 0) return null;
 
       const midpoint = new Date();
       midpoint.setDate(midpoint.getDate() - periodDays);
-      const midpointStr = midpoint.toISOString().split('T')[0];
+      const midpointStr = midpoint.toISOString().split('T')[0] ?? '';
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+      const previous = rows.results.filter((r) => (r.date as string) < midpointStr);
+      const current = rows.results.filter((r) => (r.date as string) >= midpointStr);
 
       if (current.length === 0) return null;
 
@@ -96,16 +96,16 @@ export class TrendService {
         FROM ticket_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
-      `).bind(totalDays).all();
+      `).bind(totalDays).all<Record<string, unknown>>();
 
       if (!rows.results || rows.results.length === 0) return null;
 
       const midpoint = new Date();
       midpoint.setDate(midpoint.getDate() - periodDays);
-      const midpointStr = midpoint.toISOString().split('T')[0];
+      const midpointStr = midpoint.toISOString().split('T')[0] ?? '';
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+      const previous = rows.results.filter((r) => (r.date as string) < midpointStr);
+      const current = rows.results.filter((r) => (r.date as string) >= midpointStr);
 
       if (current.length === 0) return null;
 
@@ -131,16 +131,16 @@ export class TrendService {
         FROM zscaler_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
-      `).bind(totalDays).all();
+      `).bind(totalDays).all<Record<string, unknown>>();
 
       if (!rows.results || rows.results.length === 0) return null;
 
       const midpoint = new Date();
       midpoint.setDate(midpoint.getDate() - periodDays);
-      const midpointStr = midpoint.toISOString().split('T')[0];
+      const midpointStr = midpoint.toISOString().split('T')[0] ?? '';
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+      const previous = rows.results.filter((r) => (r.date as string) < midpointStr);
+      const current = rows.results.filter((r) => (r.date as string) >= midpointStr);
 
       if (current.length === 0) return null;
 
@@ -167,16 +167,16 @@ export class TrendService {
         FROM meraki_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
-      `).bind(totalDays).all();
+      `).bind(totalDays).all<Record<string, unknown>>();
 
       if (!rows.results || rows.results.length === 0) return null;
 
       const midpoint = new Date();
       midpoint.setDate(midpoint.getDate() - periodDays);
-      const midpointStr = midpoint.toISOString().split('T')[0];
+      const midpointStr = midpoint.toISOString().split('T')[0] ?? '';
 
-      const previous = rows.results.filter((r: any) => r.date < midpointStr!);
-      const current = rows.results.filter((r: any) => r.date >= midpointStr!);
+      const previous = rows.results.filter((r) => (r.date as string) < midpointStr);
+      const current = rows.results.filter((r) => (r.date as string) >= midpointStr);
 
       if (current.length === 0) return null;
 
@@ -192,9 +192,10 @@ export class TrendService {
     }
   }
 
-  private buildTrend(current: any[], previous: any[], field: string): TrendData {
-    const currentValues = current.map((r: any) => (r[field] as number) || 0);
-    const previousValues = previous.map((r: any) => (r[field] as number) || 0);
+  private buildTrend(current: Record<string, unknown>[], previous: Record<string, unknown>[], field: string): TrendData {
+    const toNum = (val: unknown): number => (typeof val === 'number' ? val : 0);
+    const currentValues = current.map((r) => toNum(r[field]));
+    const previousValues = previous.map((r) => toNum(r[field]));
 
     const avg = (arr: number[]) => arr.length > 0
       ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;

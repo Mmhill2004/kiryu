@@ -47,7 +47,9 @@ export class SyncService {
         cacheService.invalidatePrefix('zs:summary'),
         cacheService.invalidatePrefix('mk:summary'),
       ]);
-    } catch { /* ignore cache errors */ }
+    } catch (error) {
+      console.error('Cache invalidation after sync failed:', error);
+    }
 
     // Run data retention cleanup
     try {
@@ -729,8 +731,8 @@ export class SyncService {
         // Batched deletion to avoid D1 timeout on large tables
         let totalDeleted = 0;
         const DELETE_BATCH = 500;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
+        const MAX_BATCHES = 200; // Safety limit: 100k rows max per table per run
+        for (let batch = 0; batch < MAX_BATCHES; batch++) {
           const result = await this.env.DB.prepare(
             `DELETE FROM ${table.name} WHERE rowid IN (
               SELECT rowid FROM ${table.name} WHERE ${table.dateCol} < ? LIMIT ?

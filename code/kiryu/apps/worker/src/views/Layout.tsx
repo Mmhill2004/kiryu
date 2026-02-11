@@ -25,9 +25,13 @@ export const Layout: FC<PropsWithChildren<{ title?: string }>> = ({ children, ti
             e.stopPropagation();
             var name = btn.getAttribute('data-tab');
             if (!name) return;
-            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.querySelectorAll('.tab-btn').forEach(function(b) {
+              b.classList.remove('active');
+              b.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
             var panel = document.getElementById('tab-' + name);
             if (panel) panel.classList.add('active');
           });
@@ -885,6 +889,19 @@ const styles = `
 
   footer p {
     margin: 1px 0;
+  }
+
+  /* ═══ SCREEN READER ONLY ═══ */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   /* ═══ ICONS ═══ */

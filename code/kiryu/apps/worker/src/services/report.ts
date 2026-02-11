@@ -185,12 +185,15 @@ export class ReportService {
       };
     }
 
-    // If no D1 data, try live API as fallback
+    // If no D1 data, try live API as fallback (with 25s timeout)
     if (csRows.length === 0) {
       try {
         const csClient = new CrowdStrikeClient(this.env, this.env.CACHE);
         if (csClient.isConfigured()) {
-          const live = await csClient.getFullSummary(30, 30);
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Live API fallback timed out')), 25_000)
+          );
+          const live = await Promise.race([csClient.getFullSummary(30, 30), timeoutPromise]);
           csRows = [{
             alerts_total: live.alerts.total,
             alerts_critical: live.alerts.bySeverity.critical ?? 0,

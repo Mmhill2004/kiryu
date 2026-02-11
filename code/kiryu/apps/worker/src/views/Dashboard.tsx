@@ -352,11 +352,11 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
   return (
     <Layout title="Rodgers Security Dashboard">
-      <div class="dashboard-wrapper">
+      <main class="dashboard-wrapper" aria-label="Security Dashboard">
         {/* ═══ HEADER ═══ */}
         <header>
           <div class="header-left">
-            <div class="logo-mark">
+            <div class="logo-mark" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
@@ -372,15 +372,16 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 ? `Cached ${new Date(cachedAt).toLocaleTimeString()}`
                 : 'Live data'}
             </p>
-            <a href="/api/reports/latest" class="report-link">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <a href="/api/reports/latest" class="report-link" aria-label="View latest monthly report">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
               </svg>
               Report
             </a>
             <form method="get" action="/">
-              <select name="period">
+              <label for="period-select" class="sr-only">Time period</label>
+              <select name="period" id="period-select" aria-label="Select time period">
                 {Object.entries(periodLabels).map(([val, label]) => (
                   <option value={val} selected={val === period}>{label}</option>
                 ))}
@@ -389,8 +390,9 @@ export const Dashboard: FC<Props> = ({ data }) => {
             <a
               href={`/?period=${period}&refresh=true`}
               class="refresh-btn"
+              aria-label="Refresh dashboard data"
             >
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10" />
                 <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
               </svg>
@@ -516,20 +518,20 @@ export const Dashboard: FC<Props> = ({ data }) => {
 
         {/* ═══ TABS ═══ */}
         <div class="dashboard-tabs">
-          <div class="tab-nav">
-            <button class="tab-btn active" data-tab="executive">Executive</button>
-            <button class="tab-btn" data-tab="crowdstrike">CrowdStrike</button>
-            <button class="tab-btn" data-tab="microsoft">Microsoft</button>
-            <button class="tab-btn" data-tab="salesforce">Salesforce</button>
-            <button class="tab-btn" data-tab="zia">ZIA</button>
-            <button class="tab-btn" data-tab="zpa">ZPA</button>
-            <button class="tab-btn" data-tab="zdx">ZDX</button>
-            <button class="tab-btn" data-tab="zins">ZINS</button>
-            <button class="tab-btn" data-tab="meraki">Meraki</button>
+          <div class="tab-nav" role="tablist" aria-label="Dashboard sections">
+            <button class="tab-btn active" data-tab="executive" role="tab" aria-selected="true" aria-controls="tab-executive">Executive</button>
+            <button class="tab-btn" data-tab="crowdstrike" role="tab" aria-selected="false" aria-controls="tab-crowdstrike">CrowdStrike</button>
+            <button class="tab-btn" data-tab="microsoft" role="tab" aria-selected="false" aria-controls="tab-microsoft">Microsoft</button>
+            <button class="tab-btn" data-tab="salesforce" role="tab" aria-selected="false" aria-controls="tab-salesforce">Salesforce</button>
+            <button class="tab-btn" data-tab="zia" role="tab" aria-selected="false" aria-controls="tab-zia">ZIA</button>
+            <button class="tab-btn" data-tab="zpa" role="tab" aria-selected="false" aria-controls="tab-zpa">ZPA</button>
+            <button class="tab-btn" data-tab="zdx" role="tab" aria-selected="false" aria-controls="tab-zdx">ZDX</button>
+            <button class="tab-btn" data-tab="zins" role="tab" aria-selected="false" aria-controls="tab-zins">ZINS</button>
+            <button class="tab-btn" data-tab="meraki" role="tab" aria-selected="false" aria-controls="tab-meraki">Meraki</button>
           </div>
 
           {/* ═══ EXECUTIVE TAB ═══ */}
-          <div id="tab-executive" class="tab-content active">
+          <div id="tab-executive" class="tab-content active" role="tabpanel" aria-label="Executive overview">
             {/* Row 1: Headline KPIs */}
             <div class="col-12">
               <div class="exec-headline">
@@ -804,7 +806,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ CROWDSTRIKE TAB ═══ */}
-          <div id="tab-crowdstrike" class="tab-content">
+          <div id="tab-crowdstrike" class="tab-content" role="tabpanel" aria-label="CrowdStrike details">
             {crowdstrike ? (
               <>
                 {/* Row 1: Key Metrics */}
@@ -1001,7 +1003,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ MICROSOFT TAB ═══ */}
-          <div id="tab-microsoft" class="tab-content">
+          <div id="tab-microsoft" class="tab-content" role="tabpanel" aria-label="Microsoft details">
             {microsoft ? (
               <>
                 {/* Row 1: Key Metrics */}
@@ -1195,7 +1197,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ SALESFORCE TAB ═══ */}
-          <div id="tab-salesforce" class="tab-content">
+          <div id="tab-salesforce" class="tab-content" role="tabpanel" aria-label="Salesforce details">
             {salesforce ? (
               <>
                 {/* Row 1: Case Activity KPIs */}
@@ -1332,7 +1334,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ ZIA TAB ═══ */}
-          <div id="tab-zia" class="tab-content">
+          <div id="tab-zia" class="tab-content" role="tabpanel" aria-label="Zscaler Internet Access details">
             {zscaler?.zia ? (() => {
               const zia = zscaler.zia;
               return (
@@ -1410,7 +1412,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ ZPA TAB ═══ */}
-          <div id="tab-zpa" class="tab-content">
+          <div id="tab-zpa" class="tab-content" role="tabpanel" aria-label="Zscaler Private Access details">
             {zscaler?.zpa ? (() => {
               const zpa = zscaler.zpa;
               return (
@@ -1512,7 +1514,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ ZDX TAB ═══ */}
-          <div id="tab-zdx" class="tab-content">
+          <div id="tab-zdx" class="tab-content" role="tabpanel" aria-label="Zscaler Digital Experience details">
             {zscaler?.zdx ? (() => {
               const zdx = zscaler.zdx;
               const sortedApps = [...zdx.apps].sort((a, b) => a.score - b.score);
@@ -1689,7 +1691,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ ZINS ANALYTICS TAB ═══ */}
-          <div id="tab-zins" class="tab-content">
+          <div id="tab-zins" class="tab-content" role="tabpanel" aria-label="Z-Insights analytics">
             {zscaler?.analytics ? (() => {
               const analytics = zscaler.analytics;
               const wt = analytics.webTraffic;
@@ -1857,7 +1859,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
           </div>
 
           {/* ═══ MERAKI TAB ═══ */}
-          <div id="tab-meraki" class="tab-content">
+          <div id="tab-meraki" class="tab-content" role="tabpanel" aria-label="Meraki network details">
             {meraki ? (() => {
               const d = meraki.devices;
               const vpnOnlinePct = meraki.vpn.totalTunnels > 0 ? Math.round((meraki.vpn.online / meraki.vpn.totalTunnels) * 100) : 0;
@@ -2050,7 +2052,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
         <footer>
           <p>Last updated: {new Date(lastUpdated).toLocaleString()}</p>
         </footer>
-      </div>
+      </main>
     </Layout>
   );
 };
