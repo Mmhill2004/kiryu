@@ -1635,12 +1635,16 @@ export const Dashboard: FC<Props> = ({ data }) => {
                   {/* Row 1: Key Metrics */}
                   <div class="col-12">
                     <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
-                      <MetricCard label="Total Transactions" value={wt ? formatCompact(wt.totalTransactions) : 'N/A'} source="ZS" compact />
+                      <MetricCard label="Total Transactions" value={wt ? formatCompact(wt.totalTransactions) : 'N/A'} source="ZS" compact
+                        trend={zsTrends?.analyticsTrafficAllowed ? zsTrends.analyticsTrafficAllowed : undefined} />
                       <MetricCard label="Cyber Incidents" value={cs ? formatCompact(cs.totalIncidents) : 'N/A'} source="ZS" compact
-                        severity={cs && cs.totalIncidents > 100 ? 'high' : cs && cs.totalIncidents > 0 ? 'medium' : undefined} />
-                      <MetricCard label="Shadow IT Apps" value={si ? String(si.totalApps) : 'N/A'} source="ZS" compact />
+                        severity={cs && cs.totalIncidents > 100 ? 'high' : cs && cs.totalIncidents > 0 ? 'medium' : undefined}
+                        trend={zsTrends?.analyticsCyberIncidents ? { ...zsTrends.analyticsCyberIncidents, invertColor: true } : undefined} />
+                      <MetricCard label="Shadow IT Apps" value={si ? String(si.totalApps) : 'N/A'} source="ZS" compact
+                        trend={zsTrends?.analyticsShadowItTotal ? { ...zsTrends.analyticsShadowItTotal, invertColor: true } : undefined} />
                       <MetricCard label="Threat Categories" value={wt ? String(wt.threatSuperCategories.length) : '0'} compact
-                        severity={wt && wt.threatSuperCategories.length > 5 ? 'high' : wt && wt.threatSuperCategories.length > 0 ? 'medium' : undefined} />
+                        severity={wt && wt.threatSuperCategories.length > 5 ? 'high' : wt && wt.threatSuperCategories.length > 0 ? 'medium' : undefined}
+                        trend={zsTrends?.analyticsThreatCategories ? { ...zsTrends.analyticsThreatCategories, invertColor: true } : undefined} />
                       <MetricCard label="Protocols Seen" value={wt ? String(wt.protocols.length) : '0'} compact />
                     </div>
                   </div>

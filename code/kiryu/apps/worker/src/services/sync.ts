@@ -321,6 +321,14 @@ export class SyncService {
 
     // Store daily Zscaler metrics snapshot
     const today = new Date().toISOString().split('T')[0];
+    // Compute ZINS analytics aggregate metrics for D1 storage
+    const shadowItApps = summary.analytics?.shadowIT?.apps ?? [];
+    const shadowItHighRisk = shadowItApps.filter((a) => a.risk_index >= 4).length;
+    const threatSuperCats = summary.analytics?.webTraffic?.threatSuperCategories ?? [];
+    const protocols = summary.analytics?.webTraffic?.protocols ?? [];
+    const locations = summary.analytics?.webTraffic?.byLocation ?? [];
+    const incidentCats = summary.analytics?.cyberSecurity?.byCategory ?? [];
+
     try {
       await this.env.DB.prepare(`
         INSERT OR REPLACE INTO zscaler_metrics_daily (
@@ -342,10 +350,14 @@ export class SyncService {
           analytics_traffic_allowed, analytics_traffic_blocked, analytics_threats_total,
           zia_custom_url_categories, zia_sandbox_enabled, zia_bandwidth_rules,
           zpa_connector_groups, zpa_apps_double_encrypt,
+          analytics_shadow_it_total, analytics_shadow_it_high_risk,
+          analytics_threat_categories_count,
+          analytics_top_protocols, analytics_top_locations,
+          analytics_top_threats, analytics_top_incidents, analytics_top_shadow_it,
           metadata, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
         )
       `).bind(
         today,
@@ -385,9 +397,9 @@ export class SyncService {
         summary.zdx?.totalDevices ?? 0,
         summary.zdx?.alerts.activeAlerts ?? 0,
         summary.zdx?.alerts.criticalAlerts ?? 0,
-        // Analytics columns (ZINS)
+        // Analytics columns (ZINS) — fixed: traffic_blocked was storing protocols.length
         summary.analytics?.webTraffic?.totalTransactions ?? 0,
-        summary.analytics?.webTraffic?.protocols.length ?? 0,
+        summary.analytics?.cyberSecurity?.totalIncidents ?? 0,
         summary.analytics?.cyberSecurity?.totalIncidents ?? 0,
         // Enhanced ZIA columns
         summary.zia?.customUrlCategories ?? 0,
@@ -396,6 +408,15 @@ export class SyncService {
         // Enhanced ZPA columns
         summary.zpa?.connectorGroups.total ?? 0,
         summary.zpa?.applications.doubleEncryptEnabled ?? 0,
+        // Extended ZINS analytics (migration 0008)
+        summary.analytics?.shadowIT?.totalApps ?? 0,
+        shadowItHighRisk,
+        threatSuperCats.length,
+        JSON.stringify(protocols.slice(0, 5).map((p) => ({ protocol: p.protocol, count: p.count }))),
+        JSON.stringify(locations.slice(0, 5).map((l) => ({ name: l.name, total: l.total }))),
+        JSON.stringify(threatSuperCats.slice(0, 5).map((t) => ({ category: t.category, count: t.count }))),
+        JSON.stringify(incidentCats.slice(0, 5).map((c) => ({ name: c.name, total: c.total }))),
+        JSON.stringify(shadowItApps.slice(0, 5).map((a) => ({ application: a.application, risk_index: a.risk_index, data_consumed: a.data_consumed }))),
         JSON.stringify({ errors: summary.errors })
       ).run();
       recordsSynced++;

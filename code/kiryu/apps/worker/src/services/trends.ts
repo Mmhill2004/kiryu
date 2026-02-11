@@ -35,6 +35,11 @@ export interface ZscalerTrends {
   zdxAvgScore: TrendData;
   zdxActiveAlerts: TrendData;
   analyticsTrafficBlocked: TrendData;
+  analyticsTrafficAllowed: TrendData;
+  analyticsCyberIncidents: TrendData;
+  analyticsShadowItTotal: TrendData;
+  analyticsShadowItHighRisk: TrendData;
+  analyticsThreatCategories: TrendData;
 }
 
 export interface MerakiTrends {
@@ -127,7 +132,10 @@ export class TrendService {
       const rows = await this.env.DB.prepare(`
         SELECT date, zpa_connectors_healthy, risk360_overall,
                zia_url_filter_rules_enabled, zpa_apps_total,
-               zdx_avg_score, zdx_active_alerts, analytics_traffic_blocked
+               zdx_avg_score, zdx_active_alerts, analytics_traffic_blocked,
+               analytics_traffic_allowed, analytics_threats_total,
+               analytics_shadow_it_total, analytics_shadow_it_high_risk,
+               analytics_threat_categories_count
         FROM zscaler_metrics_daily
         WHERE date >= date('now', '-' || ? || ' days')
         ORDER BY date ASC
@@ -152,6 +160,11 @@ export class TrendService {
         zdxAvgScore: this.buildTrend(current, previous, 'zdx_avg_score'),
         zdxActiveAlerts: this.buildTrend(current, previous, 'zdx_active_alerts'),
         analyticsTrafficBlocked: this.buildTrend(current, previous, 'analytics_traffic_blocked'),
+        analyticsTrafficAllowed: this.buildTrend(current, previous, 'analytics_traffic_allowed'),
+        analyticsCyberIncidents: this.buildTrend(current, previous, 'analytics_threats_total'),
+        analyticsShadowItTotal: this.buildTrend(current, previous, 'analytics_shadow_it_total'),
+        analyticsShadowItHighRisk: this.buildTrend(current, previous, 'analytics_shadow_it_high_risk'),
+        analyticsThreatCategories: this.buildTrend(current, previous, 'analytics_threat_categories_count'),
       };
     } catch (error) {
       console.error('Error fetching Zscaler trends:', error);

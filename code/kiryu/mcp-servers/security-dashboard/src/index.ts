@@ -138,7 +138,7 @@ const TOOLS = [
       properties: {
         platform: {
           type: "string",
-          enum: ["all", "crowdstrike", "abnormal", "zscaler", "microsoft", "salesforce"],
+          enum: ["all", "crowdstrike", "abnormal", "zscaler", "microsoft", "salesforce", "meraki", "cloudflare"],
           description: "Platform to sync, or 'all' for all platforms",
           default: "all",
         },
@@ -447,6 +447,206 @@ const TOOLS = [
       properties: {},
     },
   },
+  // --- Zscaler Advanced ---
+  {
+    name: "get_zscaler_connectors",
+    description:
+      "Get detailed Zscaler Private Access (ZPA) connector list including name, status, version, last connection time, and connector group membership. Use this for troubleshooting unhealthy connectors.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "query_zscaler_analytics",
+    description:
+      "Execute a raw Z-Insights (ZINS) GraphQL query. Root fields are UPPERCASE: WEB_TRAFFIC, CYBER_SECURITY, SHADOW_IT. Times are epoch milliseconds. Use this for custom analytics queries beyond the pre-built summaries.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The GraphQL query string to execute against the ZINS API",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  // --- Meraki ---
+  {
+    name: "get_meraki_summary",
+    description:
+      "Get full Meraki network infrastructure summary including device overview, connector statuses, networks, VPN tunnels, uplinks, and licensing information — all in one call.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_meraki_devices",
+    description:
+      "Get Meraki device inventory with status details. Returns device overview (total, online, alerting, offline counts) and individual device records with model, serial, status, and network assignment.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_meraki_networks",
+    description:
+      "Get all Meraki networks in the organization. Returns network names, types, tags, and configuration details.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_meraki_vpn_status",
+    description:
+      "Get Meraki site-to-site VPN tunnel statuses. Returns tunnel peers with connectivity status (online/offline), uptime, and network assignments. Use this to identify VPN connectivity issues.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_meraki_uplink_status",
+    description:
+      "Get Meraki WAN uplink statuses for all appliances. Returns uplink interface, IP, gateway, DNS, status (active/ready/not connected), and signal strength for cellular uplinks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  // --- Cloudflare ---
+  {
+    name: "get_cloudflare_access_logs",
+    description:
+      "Get Cloudflare Access audit logs showing who accessed protected applications, when, and from where. Useful for investigating unauthorized access attempts.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        since: {
+          type: "string",
+          description: "ISO date to filter logs from (e.g. '2026-02-01'). Defaults to last 24 hours.",
+        },
+      },
+    },
+  },
+  {
+    name: "get_cloudflare_gateway_logs",
+    description:
+      "Get Cloudflare Gateway DNS and HTTP logs. Shows DNS queries, HTTP requests through Gateway, and policy decisions (allow/block). Useful for investigating policy violations or threat detections.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        since: {
+          type: "string",
+          description: "ISO date to filter logs from (e.g. '2026-02-01'). Defaults to last 24 hours.",
+        },
+      },
+    },
+  },
+  {
+    name: "get_cloudflare_security_events",
+    description:
+      "Get Cloudflare security events including WAF blocks, rate limiting, bot management, and DDoS mitigation events for the configured zone.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_cloudflare_stats",
+    description:
+      "Get aggregated Cloudflare security statistics including Access login counts, Gateway query counts, security event totals, and protected application inventory.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_cloudflare_access_apps",
+    description:
+      "Get the list of Cloudflare Access protected applications including app name, domain, type, and session duration settings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  // --- Salesforce ---
+  {
+    name: "get_salesforce_tickets",
+    description:
+      "Get recent Salesforce service desk tickets with details including subject, priority, status, assignee, and creation date. Useful for investigating specific incidents or reviewing recent activity.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days to look back (1-90)",
+          default: 30,
+        },
+        limit: {
+          type: "number",
+          description: "Maximum tickets to return (1-500)",
+          default: 100,
+        },
+      },
+    },
+  },
+  {
+    name: "get_salesforce_open_tickets",
+    description:
+      "Get all currently open Salesforce tickets with aging analysis. Returns tickets grouped by age bucket (0-7d, 7-14d, 14-30d, 30d+) and individual ticket details. Use this to identify stale or aging tickets.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_salesforce_mttr",
+    description:
+      "Get mean time to resolution (MTTR) metrics from Salesforce. Returns overall MTTR, MTTR by priority level, and closed ticket count for the period.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days to analyze (1-90)",
+          default: 30,
+        },
+      },
+    },
+  },
+  {
+    name: "get_salesforce_agent_workload",
+    description:
+      "Get Salesforce agent workload distribution. Returns each agent's name and open ticket count, sorted by workload. Use this to identify overloaded agents or unbalanced ticket distribution.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  // --- Abnormal ---
+  {
+    name: "get_abnormal_cases",
+    description:
+      "Get Abnormal Security cases (investigations). Returns case details including severity, status, affected users, and threat type. Cases represent grouped related threats that warrant investigation.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_abnormal_stats",
+    description:
+      "Get aggregated Abnormal Security statistics including total threats detected, threats by category (phishing, BEC, malware, etc.), and detection trend data.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
 ];
 
 // Tool handlers
@@ -613,6 +813,95 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_zscaler_diagnostic": {
       return apiRequest("/api/integrations/zscaler/diagnostic");
+    }
+
+    // Zscaler Advanced
+    case "get_zscaler_connectors": {
+      return apiRequest("/api/integrations/zscaler/zpa/connectors");
+    }
+
+    case "query_zscaler_analytics": {
+      const query = args.query as string;
+      if (!query) throw new Error("query is required");
+      return apiRequest("/api/integrations/zscaler/analytics/query", {
+        method: "POST",
+        body: JSON.stringify({ query }),
+      });
+    }
+
+    // Meraki
+    case "get_meraki_summary": {
+      return apiRequest("/api/integrations/meraki/summary");
+    }
+
+    case "get_meraki_devices": {
+      return apiRequest("/api/integrations/meraki/devices");
+    }
+
+    case "get_meraki_networks": {
+      return apiRequest("/api/integrations/meraki/networks");
+    }
+
+    case "get_meraki_vpn_status": {
+      return apiRequest("/api/integrations/meraki/vpn");
+    }
+
+    case "get_meraki_uplink_status": {
+      return apiRequest("/api/integrations/meraki/uplinks");
+    }
+
+    // Cloudflare
+    case "get_cloudflare_access_logs": {
+      const since = args.since as string | undefined;
+      const params = since ? `?since=${encodeURIComponent(since)}` : "";
+      return apiRequest(`/api/integrations/cloudflare/access/logs${params}`);
+    }
+
+    case "get_cloudflare_gateway_logs": {
+      const since = args.since as string | undefined;
+      const params = since ? `?since=${encodeURIComponent(since)}` : "";
+      return apiRequest(`/api/integrations/cloudflare/gateway/logs${params}`);
+    }
+
+    case "get_cloudflare_security_events": {
+      return apiRequest("/api/integrations/cloudflare/security/events");
+    }
+
+    case "get_cloudflare_stats": {
+      return apiRequest("/api/integrations/cloudflare/stats");
+    }
+
+    case "get_cloudflare_access_apps": {
+      return apiRequest("/api/integrations/cloudflare/access/apps");
+    }
+
+    // Salesforce
+    case "get_salesforce_tickets": {
+      const days = (args.days as number) || 30;
+      const limit = (args.limit as number) || 100;
+      return apiRequest(`/api/integrations/salesforce/tickets?days=${days}&limit=${limit}`);
+    }
+
+    case "get_salesforce_open_tickets": {
+      return apiRequest("/api/integrations/salesforce/open");
+    }
+
+    case "get_salesforce_mttr": {
+      const days = (args.days as number) || 30;
+      return apiRequest(`/api/integrations/salesforce/mttr?days=${days}`);
+    }
+
+    case "get_salesforce_agent_workload": {
+      return apiRequest("/api/integrations/salesforce/workload");
+    }
+
+    // Abnormal
+    case "get_abnormal_cases": {
+      return apiRequest("/api/integrations/abnormal/cases");
+    }
+
+    case "get_abnormal_stats": {
+      return apiRequest("/api/integrations/abnormal/stats");
     }
 
     default:
