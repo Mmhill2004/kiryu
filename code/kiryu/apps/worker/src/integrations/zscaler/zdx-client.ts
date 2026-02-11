@@ -76,13 +76,12 @@ export class ZDXClient {
 
   async getDeviceCount(sinceHours = 2): Promise<number> {
     try {
-      // API returns { devices: [...], next_offset: "" } — no total_count field
-      // Use limit=500 to get a reasonable count; if next_offset is non-empty, there are more
+      // ZDX API uses cursor-based pagination (next_offset), not limit/offset params
       const data = await this.auth.zdxFetch<{
         devices?: unknown[];
         total_count?: number;
         next_offset?: string;
-      }>(`/devices?since=${sinceHours}&limit=500&offset=0`);
+      }>(`/devices?since=${sinceHours}`);
       if (data.total_count) return data.total_count;
       const count = (data.devices || []).length;
       // If next_offset is set, there are more pages — report count as approximate
@@ -93,9 +92,9 @@ export class ZDXClient {
     }
   }
 
-  async getAlerts(sinceHours = 24): Promise<ZDXSummary['alerts']> {
+  async getAlerts(sinceHours = 2): Promise<ZDXSummary['alerts']> {
     try {
-      // API may return { alerts: [...] } or plain array
+      // ZDX alerts endpoint — use same since (hours) format as /apps
       const raw = await this.auth.zdxFetch<unknown>(`/alerts?since=${sinceHours}`);
       const list: Array<{
         id?: number;
@@ -138,7 +137,7 @@ export class ZDXClient {
     const [apps, deviceCount, alerts] = await Promise.allSettled([
       this.getApps(sinceHours),
       this.getDeviceCount(sinceHours),
-      this.getAlerts(24),
+      this.getAlerts(sinceHours),
     ]);
 
     const appList = apps.status === 'fulfilled' ? apps.value : [];
