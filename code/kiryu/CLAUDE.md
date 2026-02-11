@@ -122,7 +122,7 @@ kiryu/
 ## Key Files
 
 ### Integration Clients (`integrations/*/client.ts`)
-All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`.
+All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`. All clients have AbortController timeouts (10s OAuth, 20s data). All route handlers check `isConfigured()` before calling client methods.
 
 - **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
 - **Microsoft** — 8 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
@@ -131,14 +131,14 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data.
   - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler.
   - **Risk360 / ZRA** — No public API exists (as of Feb 2026). The `RISK_SCORE` type exists in the ZINS GraphQL schema but is not exposed as a queryable root field (confirmed by Zscaler SDK PR #443). REST paths under `/zra/` and `/risk360/` on the OneAPI gateway return 401 — no service is registered. Risk360 scores must be entered manually via `POST /api/integrations/zscaler/risk360` and are stored in KV. Monitor the ZIdentity admin portal (API Resources) and Zscaler SDK releases for future API availability.
-- **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
-- **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
+- **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
+- **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. `getGatewayLogs()` uses GraphQL variables (not string interpolation) to prevent injection. Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
-- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV. 90-day retention with batched deletes.
-- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline).
-- **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine.
+- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV (errors logged). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
+- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). Uses `Record<string, unknown>` for D1 rows (no `any`).
+- **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine. Live API fallback has 25s timeout.
 
 ### Views
 - **Dashboard.tsx** — Main dashboard with 9 tabs: Executive, CrowdStrike, Microsoft, Salesforce, ZIA, ZPA, ZDX, ZINS, Meraki. Executive tab is the default active tab.
@@ -146,7 +146,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **ZINS tab** — Dedicated Z-Insights analytics: DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
-- **Layout.tsx** — Base HTML shell with all CSS. Includes executive-specific styles (`.exec-headline`, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), and health indicator cards (`.exec-health-card`).
+- **Layout.tsx** — Base HTML shell with all CSS. Includes executive-specific styles (`.exec-headline`, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), and `.sr-only` utility for screen-reader-only text. Tab JS manages `aria-selected` state.
 
 ## API Routes
 
@@ -262,6 +262,8 @@ Key type patterns:
 - `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
 - Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
 - All optional integration credentials (Abnormal, Zscaler, Meraki, Cloudflare) are typed as optional `string?` in `Env` — clients check with `isConfigured()`
+- D1 query results: use `.all<Record<string, unknown>>()` — never `any`. Cast fields explicitly (e.g., `r.date as string`, `typeof val === 'number' ? val : 0`)
+- Null checks: use strict `=== null` (not falsy `!value`) when checking for missing API sub-module data — avoids treating `0` or `""` as missing
 
 ## Performance & Stability
 
@@ -275,7 +277,7 @@ All external API calls have AbortController timeouts:
 All three OAuth clients (CS, SF, MS) deduplicate concurrent auth requests via `pendingAuth` promise tracking — prevents thundering herd on token expiry.
 
 ### Batched Database Operations
-Sync service uses `DB.batch()` for all bulk inserts instead of sequential statements. Data retention cleanup runs batched DELETEs with `LIMIT 500` to avoid locking.
+Sync service uses `DB.batch()` for all bulk inserts instead of sequential statements. Data retention cleanup runs batched DELETEs with `LIMIT 500` and a `MAX_BATCHES=200` safety cap (100k rows max per table per run) to avoid locking or runaway loops.
 
 ### Cache Invalidation
 `CacheService.invalidatePrefix()` uses cursor-based pagination to handle >1000 keys per prefix.
@@ -317,6 +319,32 @@ export class PlatformClient {
   async getSummary(): Promise<Summary> { /* parallel API calls */ }
 }
 ```
+
+### Route Handler Pattern
+All integration routes check `isConfigured()` before proceeding. Error responses use generic messages (never leak raw `error.message` to clients — log details server-side with `console.error`).
+```typescript
+const client = new PlatformClient(c.env);
+if (!client.isConfigured()) {
+  return c.json({ configured: false, error: 'Platform not configured' }, 503);
+}
+```
+
+## Security
+
+- **Never return raw error messages** to API clients — use generic messages and `console.error` the details server-side
+- **GraphQL queries must use variables** (not string interpolation) to prevent injection — see Cloudflare `getGatewayLogs()` as the reference pattern
+- **All fetch calls require AbortController timeouts** — 10s for OAuth, 20s for data, 25s for dashboard/report fallbacks
+- **Sync cleanup loops must have a max iteration cap** — use `MAX_BATCHES` constant to prevent runaway deletes
+
+## Accessibility
+
+Dashboard uses ARIA attributes for screen reader support:
+- Tab navigation: `role="tablist"` on container, `role="tab"` with `aria-selected` and `aria-controls` on buttons, `role="tabpanel"` with `aria-label` on content panels
+- Tab JS in Layout.tsx toggles `aria-selected` when switching tabs
+- Decorative SVGs use `aria-hidden="true"`
+- Interactive elements (refresh button, report link, period select) have `aria-label`
+- Dashboard wrapper uses `<main>` landmark
+- `.sr-only` utility class available in Layout.tsx for screen-reader-only text
 
 ## Deployment
 
