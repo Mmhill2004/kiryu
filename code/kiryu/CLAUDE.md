@@ -54,7 +54,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 35 tools
+- **AI Integration**: MCP server with 53 tools
 
 ## Common Commands
 
@@ -73,6 +73,7 @@ wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0004_e
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0005_zscaler_metrics.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0006_zdx_analytics_metrics.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0007_meraki_metrics.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0008_zscaler_analytics_extended.sql --remote
 
 # Add secrets
 wrangler secret put SECRET_NAME --name security-dashboard-api
@@ -116,8 +117,8 @@ kiryu/
 │   │   └── report.ts         # Monthly report generation + R2 storage
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
-├── packages/db/migrations/   # D1 SQL migrations (7 files)
-└── mcp-servers/security-dashboard/  # MCP server (35 tools)
+├── packages/db/migrations/   # D1 SQL migrations (8 files)
+└── mcp-servers/security-dashboard/  # MCP server (53 tools)
 ```
 
 ## Key Files
@@ -130,15 +131,15 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
 - **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data.
-  - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler.
+  - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler. D1 stores daily aggregates (traffic totals, incident count, shadow IT total/high-risk, threat category count) plus top-5 JSON snapshots (protocols, locations, threats, incidents, riskiest shadow IT apps) for trend tracking.
   - **Risk360 / ZRA** — No public API exists (as of Feb 2026). The `RISK_SCORE` type exists in the ZINS GraphQL schema but is not exposed as a queryable root field (confirmed by Zscaler SDK PR #443). REST paths under `/zra/` and `/risk360/` on the OneAPI gateway return 401 — no service is registered. Risk360 scores must be entered manually via `POST /api/integrations/zscaler/risk360` and are stored in KV. Monitor the ZIdentity admin portal (API Resources) and Zscaler SDK releases for future API availability.
 - **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
 - **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. `getGatewayLogs()` uses GraphQL variables (not string interpolation) to prevent injection. Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
-- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV (errors logged). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
-- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). Uses `Record<string, unknown>` for D1 rows (no `any`).
+- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV (errors logged). Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
+- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). `ZscalerTrends` includes 12 fields: ZPA health, ZIA rules, ZDX scores, Risk360, and ZINS analytics (traffic, incidents, shadow IT, threat categories). Uses `Record<string, unknown>` for D1 rows (no `any`).
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine. Live API fallback has 25s timeout.
 
 ### Views
@@ -146,7 +147,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **Top KPI strip** — 5 actionable metrics (Critical Alerts, Open Incidents, Risky Users, Open Cases, SLA). Informational metrics (Secure Score, Endpoints, ZDX Score) live in platform tabs, not the top bar.
   - **Platform status row** — Horizontal badges below KPI strip showing connected platforms with health dots (green/red/gray).
   - **Executive tab** — CEO-friendly cross-platform overview: 3 headline gauges (Security Score, Compliance, Network Uptime), 5 health indicator gauges (Asset Health, Threat Posture, Compliance Posture, Connectivity, Service Delivery) aggregating metrics across CS/MS/SF/ZS/MK, 6 platform summary cards, and auto-generated action items from threshold checks.
-  - **ZINS tab** — Dedicated Z-Insights analytics: DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
+  - **ZINS tab** — Dedicated Z-Insights analytics with D1-backed trend indicators on key metrics (Total Transactions, Cyber Incidents, Shadow IT Apps, Threat Categories). DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
@@ -171,7 +172,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 35 tools covering all platforms (including Zscaler-specific tools: summary, zia, zpa, zdx, analytics, risk360, diagnostic). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 53 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (6), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -187,7 +188,7 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 - `audit_logs` - Audit trail
 - `ticket_metrics_daily` - Daily Salesforce ticket KPIs
 - `crowdstrike_metrics_daily` - Daily CrowdStrike snapshots (~68 columns across 12 modules)
-- `zscaler_metrics_daily` - Daily Zscaler snapshots (ZIA, ZPA, ZDX, Analytics, Risk360)
+- `zscaler_metrics_daily` - Daily Zscaler snapshots (ZIA, ZPA, ZDX, Analytics with ZINS breakdowns, Risk360)
 - `meraki_metrics_daily` - Daily Meraki snapshots (devices, networks, VPN, uplinks, licensing)
 - `data_retention_log` - Tracks automated cleanup runs (90-day retention)
 
