@@ -64,6 +64,163 @@ const formatDuration = (minutes: number): string => {
   return `${(minutes / 1440).toFixed(1)}d`;
 };
 
+function formatCompact(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const val = bytes / Math.pow(1024, i);
+  return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i] ?? 'B'}`;
+}
+
+interface HealthIndicator {
+  score: number;
+  label: string;
+  metrics: Array<{ name: string; value: string; source: string; severity?: 'critical' | 'high' | 'medium' | 'low' }>;
+}
+
+function calculateHealthIndicators(
+  crowdstrike: DashboardData['crowdstrike'],
+  microsoft: DashboardData['microsoft'],
+  salesforce: DashboardData['salesforce'],
+  zscaler: DashboardData['zscaler'],
+  meraki: DashboardData['meraki'],
+): HealthIndicator[] {
+  const indicators: HealthIndicator[] = [];
+
+  // 1. Asset Health
+  {
+    const metrics: HealthIndicator['metrics'] = [];
+    let totalAssets = 0;
+    let healthyAssets = 0;
+    if (crowdstrike) {
+      const stale = crowdstrike.hosts.staleEndpoints;
+      totalAssets += crowdstrike.hosts.total;
+      healthyAssets += crowdstrike.hosts.total - stale;
+      metrics.push({ name: 'Stale Hosts', value: String(stale), source: 'CS', severity: stale > 5 ? 'high' : stale > 0 ? 'medium' : undefined });
+    }
+    if (microsoft) {
+      const stale = microsoft.machines.stale;
+      totalAssets += microsoft.machines.total;
+      healthyAssets += microsoft.machines.total - stale;
+      metrics.push({ name: 'Stale Machines', value: String(stale), source: 'MS', severity: stale > 5 ? 'high' : stale > 0 ? 'medium' : undefined });
+    }
+    if (meraki) {
+      const offline = meraki.devices.offline;
+      totalAssets += meraki.devices.total;
+      healthyAssets += meraki.devices.total - offline;
+      metrics.push({ name: 'Offline Devices', value: String(offline), source: 'MK', severity: offline > 2 ? 'critical' : offline > 0 ? 'high' : undefined });
+    }
+    const score = totalAssets > 0 ? Math.round((healthyAssets / totalAssets) * 100) : 0;
+    indicators.push({ score, label: 'Asset Health', metrics });
+  }
+
+  // 2. Active Threats
+  {
+    const metrics: HealthIndicator['metrics'] = [];
+    let threatWeight = 0;
+    if (crowdstrike) {
+      const crit = crowdstrike.alerts.bySeverity.critical;
+      const high = crowdstrike.alerts.bySeverity.high;
+      threatWeight += crit * 10 + high * 3;
+      metrics.push({ name: 'Critical Alerts', value: String(crit), source: 'CS', severity: crit > 0 ? 'critical' : undefined });
+      metrics.push({ name: 'High Alerts', value: String(high), source: 'CS', severity: high > 0 ? 'high' : undefined });
+    }
+    if (microsoft) {
+      const msHigh = microsoft.alertAnalytics.bySeverity.high + microsoft.defenderAnalytics.bySeverity.high;
+      threatWeight += msHigh * 5;
+      metrics.push({ name: 'High Alerts', value: String(msHigh), source: 'MS', severity: msHigh > 0 ? 'high' : undefined });
+    }
+    if (zscaler?.analytics?.cyberSecurity) {
+      const incidents = zscaler.analytics.cyberSecurity.totalIncidents;
+      threatWeight += Math.min(incidents, 100);
+      metrics.push({ name: 'Cyber Incidents', value: formatCompact(incidents), source: 'ZS', severity: incidents > 50 ? 'high' : incidents > 0 ? 'medium' : undefined });
+    }
+    const score = Math.round(100 * Math.max(0, 1 - Math.log10(1 + threatWeight) / 2.5));
+    indicators.push({ score, label: 'Active Threats', metrics });
+  }
+
+  // 3. Compliance Posture
+  {
+    const metrics: HealthIndicator['metrics'] = [];
+    const scores: number[] = [];
+    if (crowdstrike) {
+      const ztaScore = crowdstrike.zta.avgScore;
+      scores.push(ztaScore);
+      metrics.push({ name: 'ZTA Score', value: `${ztaScore}%`, source: 'CS' });
+    }
+    if (microsoft?.secureScore && microsoft.secureScore.maxScore > 0) {
+      const msPct = Math.round((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100);
+      scores.push(msPct);
+      metrics.push({ name: 'Secure Score', value: `${msPct}%`, source: 'MS' });
+    }
+    if (microsoft) {
+      const totalDev = microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown;
+      if (totalDev > 0) {
+        const compPct = Math.round((microsoft.compliance.compliant / totalDev) * 100);
+        scores.push(compPct);
+        metrics.push({ name: 'Device Compliance', value: `${compPct}%`, source: 'MS' });
+      }
+    }
+    const score = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    indicators.push({ score, label: 'Compliance Posture', metrics });
+  }
+
+  // 4. Connectivity Health
+  {
+    const metrics: HealthIndicator['metrics'] = [];
+    const scores: number[] = [];
+    if (zscaler?.zpa) {
+      const unhealthy = zscaler.zpa.connectors.unhealthy;
+      const total = zscaler.zpa.connectors.total;
+      const pct = total > 0 ? Math.round(((total - unhealthy) / total) * 100) : 100;
+      scores.push(pct);
+      metrics.push({ name: 'Unhealthy Connectors', value: String(unhealthy), source: 'ZS', severity: unhealthy > 0 ? 'critical' : undefined });
+    }
+    if (meraki) {
+      if (meraki.vpn.totalTunnels > 0) {
+        const vpnPct = Math.round((meraki.vpn.online / meraki.vpn.totalTunnels) * 100);
+        scores.push(vpnPct);
+        metrics.push({ name: 'VPN Offline', value: String(meraki.vpn.offline), source: 'MK', severity: meraki.vpn.offline > 0 ? 'high' : undefined });
+      }
+      if (meraki.uplinks.totalUplinks > 0) {
+        const uplinkPct = Math.round((meraki.uplinks.active / meraki.uplinks.totalUplinks) * 100);
+        scores.push(uplinkPct);
+        metrics.push({ name: 'Failed Uplinks', value: String(meraki.uplinks.failed), source: 'MK', severity: meraki.uplinks.failed > 0 ? 'critical' : undefined });
+      }
+    }
+    const score = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    indicators.push({ score, label: 'Connectivity', metrics });
+  }
+
+  // 5. Service Delivery
+  {
+    const metrics: HealthIndicator['metrics'] = [];
+    const scores: number[] = [];
+    if (salesforce) {
+      scores.push(Math.min(100, salesforce.slaComplianceRate));
+      metrics.push({ name: 'SLA Compliance', value: `${salesforce.slaComplianceRate.toFixed(0)}%`, source: 'SF', severity: salesforce.slaComplianceRate < 90 ? 'critical' : salesforce.slaComplianceRate < 95 ? 'medium' : undefined });
+      const mttrMinutes = salesforce.mttr.overall;
+      const mttrScore = Math.round(Math.max(0, Math.min(100, 100 - ((mttrMinutes - 240) / (1440 - 240)) * 100)));
+      scores.push(mttrScore);
+      metrics.push({ name: 'MTTR', value: formatDuration(mttrMinutes), source: 'SF' });
+      const escScore = Math.round(Math.max(0, 100 - salesforce.escalationRate * 5));
+      scores.push(escScore);
+      metrics.push({ name: 'Escalation Rate', value: `${salesforce.escalationRate.toFixed(1)}%`, source: 'SF', severity: salesforce.escalationRate > 15 ? 'critical' : salesforce.escalationRate > 5 ? 'medium' : undefined });
+    }
+    const score = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    indicators.push({ score, label: 'Service Delivery', metrics });
+  }
+
+  return indicators;
+}
+
 function calculateCompositeScore(
   crowdstrike: DashboardData['crowdstrike'],
   microsoft: DashboardData['microsoft'],
@@ -137,6 +294,61 @@ export const Dashboard: FC<Props> = ({ data }) => {
   const criticalAlerts = (crowdstrike?.alerts.bySeverity.critical ?? 0) + (microsoft?.alertAnalytics.bySeverity.high ?? 0);
   const openIncidents = (crowdstrike?.incidents.open ?? 0) + (microsoft?.incidents.open ?? 0);
   const riskyUsers = microsoft?.identity.riskyUsers.unresolvedCount ?? 0;
+  const healthIndicators = calculateHealthIndicators(crowdstrike, microsoft, salesforce, zscaler, meraki);
+
+  // Executive tab computed values
+  const complianceAvg = (() => {
+    const scores: number[] = [];
+    if (crowdstrike) scores.push(crowdstrike.zta.avgScore);
+    if (microsoft?.secureScore && microsoft.secureScore.maxScore > 0) {
+      scores.push(Math.round((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100));
+    }
+    if (microsoft) {
+      const totalDev = microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown;
+      if (totalDev > 0) scores.push(Math.round((microsoft.compliance.compliant / totalDev) * 100));
+    }
+    return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  })();
+
+  const networkUptime = (() => {
+    if (!meraki) return 0;
+    const total = meraki.devices.total;
+    const online = meraki.devices.online;
+    return total > 0 ? Math.round((online / total) * 100) : 0;
+  })();
+
+  // Executive action items
+  const actionItems: Array<{ text: string; severity: 'critical' | 'high' | 'medium' }> = [];
+  if ((crowdstrike?.alerts.bySeverity.critical ?? 0) > 0) {
+    actionItems.push({ text: `${crowdstrike?.alerts.bySeverity.critical} critical CrowdStrike alerts require immediate investigation`, severity: 'critical' });
+  }
+  if (riskyUsers > 0) {
+    actionItems.push({ text: `${riskyUsers} risky users detected in Entra ID`, severity: riskyUsers > 5 ? 'critical' : 'high' });
+  }
+  if ((zscaler?.zpa?.connectors.unhealthy ?? 0) > 0) {
+    actionItems.push({ text: `${zscaler?.zpa?.connectors.unhealthy} ZPA connectors offline`, severity: 'critical' });
+  }
+  if ((meraki?.devices.offline ?? 0) > 2) {
+    actionItems.push({ text: `${meraki?.devices.offline} Meraki devices offline`, severity: 'high' });
+  }
+  if (salesforce && salesforce.slaComplianceRate < 95) {
+    actionItems.push({ text: `SLA compliance at ${salesforce.slaComplianceRate.toFixed(0)}% (target: 95%)`, severity: salesforce.slaComplianceRate < 90 ? 'critical' : 'medium' });
+  }
+  if (zscaler?.zdx && zscaler.zdx.averageScore < 50) {
+    actionItems.push({ text: `Digital Experience score is ${zscaler.zdx.averageScore} (Poor)`, severity: 'high' });
+  }
+  if ((crowdstrike?.hosts.staleEndpoints ?? 0) > 5) {
+    actionItems.push({ text: `${crowdstrike?.hosts.staleEndpoints} stale CrowdStrike endpoints (>7d offline)`, severity: 'medium' });
+  }
+  if (microsoft) {
+    const totalDev = microsoft.compliance.compliant + microsoft.compliance.nonCompliant + microsoft.compliance.unknown;
+    if (totalDev > 0) {
+      const compPct = Math.round((microsoft.compliance.compliant / totalDev) * 100);
+      if (compPct < 90) {
+        actionItems.push({ text: `Device compliance at ${compPct}% (target: 90%)`, severity: compPct < 75 ? 'critical' : 'medium' });
+      }
+    }
+  }
 
   return (
     <Layout title="Rodgers Security Dashboard">
@@ -305,17 +517,294 @@ export const Dashboard: FC<Props> = ({ data }) => {
         {/* ═══ TABS ═══ */}
         <div class="dashboard-tabs">
           <div class="tab-nav">
-            <button class="tab-btn active" data-tab="crowdstrike">CrowdStrike</button>
+            <button class="tab-btn active" data-tab="executive">Executive</button>
+            <button class="tab-btn" data-tab="crowdstrike">CrowdStrike</button>
             <button class="tab-btn" data-tab="microsoft">Microsoft</button>
             <button class="tab-btn" data-tab="salesforce">Salesforce</button>
             <button class="tab-btn" data-tab="zia">ZIA</button>
             <button class="tab-btn" data-tab="zpa">ZPA</button>
             <button class="tab-btn" data-tab="zdx">ZDX</button>
+            <button class="tab-btn" data-tab="zins">ZINS</button>
             <button class="tab-btn" data-tab="meraki">Meraki</button>
           </div>
 
+          {/* ═══ EXECUTIVE TAB ═══ */}
+          <div id="tab-executive" class="tab-content active">
+            {/* Row 1: Headline KPIs */}
+            <div class="col-12">
+              <div class="exec-headline">
+                <div class="exec-headline-card">
+                  <GaugeChart value={securityScore ?? 0} label="Security Score" sublabel={securityScore !== null ? (securityScore >= 80 ? 'Good' : securityScore >= 50 ? 'Fair' : 'Critical') : 'N/A'} />
+                </div>
+                <div class="exec-headline-card">
+                  <div class={`exec-big-value ${criticalAlerts > 5 ? 'severity-critical' : criticalAlerts > 0 ? 'severity-high' : ''}`}>
+                    {criticalAlerts}
+                  </div>
+                  <div class="exec-label">Active Threats</div>
+                  <div class="exec-sublabel">
+                    {crowdstrike ? `CS: ${crowdstrike.alerts.bySeverity.critical}` : ''}
+                    {crowdstrike && microsoft ? ' | ' : ''}
+                    {microsoft ? `MS: ${microsoft.alertAnalytics.bySeverity.high + microsoft.defenderAnalytics.bySeverity.high}` : ''}
+                    {zscaler?.analytics?.cyberSecurity ? ` | ZS: ${formatCompact(zscaler.analytics.cyberSecurity.totalIncidents)}` : ''}
+                  </div>
+                </div>
+                <div class="exec-headline-card">
+                  <GaugeChart value={complianceAvg} label="Compliance" sublabel={complianceAvg >= 80 ? 'On Track' : complianceAvg >= 50 ? 'Needs Work' : 'At Risk'} />
+                </div>
+                <div class="exec-headline-card">
+                  <GaugeChart value={networkUptime} label="Network Uptime" sublabel={meraki ? `${meraki.devices.online}/${meraki.devices.total} devices` : 'N/A'} />
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2: Health Indicators */}
+            <div class="col-12">
+              <div class="exec-health-grid">
+                {healthIndicators.map((ind) => (
+                  <div key={ind.label} class={`exec-health-card ${ind.score >= 80 ? 'health-good' : ind.score >= 50 ? 'health-warn' : 'health-bad'}`}>
+                    <GaugeChart value={ind.score} label="" size="sm" />
+                    <div class="health-title">{ind.label}</div>
+                    <div class="health-metrics">
+                      {ind.metrics.map((m) => (
+                        <div class="health-metric-row" key={m.name}>
+                          <span class="stat-label">{m.name}</span>
+                          <span style="display: flex; align-items: center; gap: 4px;">
+                            <span class={`stat-value ${m.severity ? `severity-${m.severity}` : ''}`}>{m.value}</span>
+                            <span class="metric-source">{m.source}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Row 3: Platform Summary Cards */}
+            <div class="col-12">
+              <div class="exec-summary-grid">
+                {/* Threat Landscape */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Threat Landscape</div>
+                  {crowdstrike && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">CS</span> Critical Alerts</span>
+                        <span class={`exec-stat-value ${crowdstrike.alerts.bySeverity.critical > 0 ? 'severity-critical' : ''}`}>{crowdstrike.alerts.bySeverity.critical}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">CS</span> Open Incidents</span>
+                        <span class="exec-stat-value">{crowdstrike.incidents.open}</span>
+                      </div>
+                    </>
+                  )}
+                  {microsoft && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MS</span> High Alerts</span>
+                        <span class={`exec-stat-value ${microsoft.alertAnalytics.bySeverity.high > 0 ? 'severity-high' : ''}`}>{microsoft.alertAnalytics.bySeverity.high}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MS</span> Open Incidents</span>
+                        <span class="exec-stat-value">{microsoft.incidents.open}</span>
+                      </div>
+                    </>
+                  )}
+                  {zscaler?.analytics?.cyberSecurity && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> Cyber Incidents</span>
+                      <span class={`exec-stat-value ${zscaler.analytics.cyberSecurity.totalIncidents > 100 ? 'severity-high' : ''}`}>{formatCompact(zscaler.analytics.cyberSecurity.totalIncidents)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Compliance & Risk */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Compliance &amp; Risk</div>
+                  {crowdstrike?.crowdScore && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">CS</span> CrowdScore</span>
+                      <span class={`exec-stat-value ${crowdstrike.crowdScore.current > 70 ? 'severity-critical' : crowdstrike.crowdScore.current > 40 ? 'severity-medium' : ''}`}>{crowdstrike.crowdScore.current}</span>
+                    </div>
+                  )}
+                  {microsoft?.secureScore && microsoft.secureScore.maxScore > 0 && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">MS</span> Secure Score</span>
+                      <span class="exec-stat-value">{Math.round((microsoft.secureScore.currentScore / microsoft.secureScore.maxScore) * 100)}%</span>
+                    </div>
+                  )}
+                  {microsoft && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">MS</span> Risky Users</span>
+                      <span class={`exec-stat-value ${riskyUsers > 0 ? 'severity-critical' : ''}`}>{riskyUsers}</span>
+                    </div>
+                  )}
+                  {crowdstrike && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">CS</span> ZTA Score</span>
+                      <span class="exec-stat-value">{crowdstrike.zta.avgScore}%</span>
+                    </div>
+                  )}
+                  {zscaler?.risk360 && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> Risk360</span>
+                      <span class="exec-stat-value">{zscaler.risk360.overallScore}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Infrastructure Health */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Infrastructure Health</div>
+                  {meraki && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MK</span> Devices Online</span>
+                        <span class="exec-stat-value">{meraki.devices.online}/{meraki.devices.total}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MK</span> VPN Tunnels</span>
+                        <span class="exec-stat-value">{meraki.vpn.online}/{meraki.vpn.totalTunnels}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MK</span> Uplinks Active</span>
+                        <span class="exec-stat-value">{meraki.uplinks.active}/{meraki.uplinks.totalUplinks}</span>
+                      </div>
+                    </>
+                  )}
+                  {zscaler?.zpa && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> ZPA Connectors</span>
+                      <span class={`exec-stat-value ${zscaler.zpa.connectors.unhealthy > 0 ? 'severity-critical' : ''}`}>
+                        {zscaler.zpa.connectors.total - zscaler.zpa.connectors.unhealthy}/{zscaler.zpa.connectors.total}
+                      </span>
+                    </div>
+                  )}
+                  {zscaler?.zdx && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> DX Score</span>
+                      <span class={`exec-stat-value ${zscaler.zdx.averageScore < 34 ? 'severity-critical' : zscaler.zdx.averageScore < 66 ? 'severity-medium' : ''}`}>{zscaler.zdx.averageScore}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Service Delivery */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Service Delivery</div>
+                  {salesforce && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">SF</span> Open Cases</span>
+                        <span class="exec-stat-value">{salesforce.openTickets}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">SF</span> SLA Compliance</span>
+                        <span class={`exec-stat-value ${salesforce.slaComplianceRate < 90 ? 'severity-critical' : salesforce.slaComplianceRate < 95 ? 'severity-medium' : ''}`}>{salesforce.slaComplianceRate.toFixed(0)}%</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">SF</span> MTTR</span>
+                        <span class="exec-stat-value">{formatDuration(salesforce.mttr.overall)}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">SF</span> Escalation Rate</span>
+                        <span class={`exec-stat-value ${salesforce.escalationRate > 15 ? 'severity-critical' : salesforce.escalationRate > 5 ? 'severity-medium' : ''}`}>{salesforce.escalationRate.toFixed(1)}%</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Endpoint Coverage */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Endpoint Coverage</div>
+                  {crowdstrike && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">CS</span> Total Hosts</span>
+                        <span class="exec-stat-value">{crowdstrike.hosts.total}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">CS</span> Online</span>
+                        <span class="exec-stat-value">{crowdstrike.hosts.online}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">CS</span> Stale (&gt;7d)</span>
+                        <span class={`exec-stat-value ${crowdstrike.hosts.staleEndpoints > 5 ? 'severity-high' : crowdstrike.hosts.staleEndpoints > 0 ? 'severity-medium' : ''}`}>{crowdstrike.hosts.staleEndpoints}</span>
+                      </div>
+                    </>
+                  )}
+                  {microsoft && (
+                    <>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MS</span> Machines</span>
+                        <span class="exec-stat-value">{microsoft.machines.total}</span>
+                      </div>
+                      <div class="exec-stat-row">
+                        <span class="exec-stat-label"><span class="metric-source">MS</span> Stale</span>
+                        <span class={`exec-stat-value ${microsoft.machines.stale > 5 ? 'severity-high' : microsoft.machines.stale > 0 ? 'severity-medium' : ''}`}>{microsoft.machines.stale}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Web & Email Security */}
+                <div class="exec-summary-card">
+                  <div class="card-title">Web &amp; Email Security</div>
+                  {zscaler?.analytics?.webTraffic && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> Transactions</span>
+                      <span class="exec-stat-value">{formatCompact(zscaler.analytics.webTraffic.totalTransactions)}</span>
+                    </div>
+                  )}
+                  {zscaler?.analytics?.cyberSecurity && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> Cyber Incidents</span>
+                      <span class={`exec-stat-value ${zscaler.analytics.cyberSecurity.totalIncidents > 100 ? 'severity-high' : ''}`}>{formatCompact(zscaler.analytics.cyberSecurity.totalIncidents)}</span>
+                    </div>
+                  )}
+                  {zscaler?.analytics?.shadowIT && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> Risky Apps</span>
+                      <span class={`exec-stat-value ${zscaler.analytics.shadowIT.apps.filter(a => a.risk_index >= 4).length > 0 ? 'severity-critical' : ''}`}>
+                        {zscaler.analytics.shadowIT.apps.filter(a => a.risk_index >= 4).length}
+                      </span>
+                    </div>
+                  )}
+                  {zscaler?.zdx && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> DX Score</span>
+                      <span class={`exec-stat-value ${zscaler.zdx.averageScore < 34 ? 'severity-critical' : zscaler.zdx.averageScore < 66 ? 'severity-medium' : ''}`}>{zscaler.zdx.averageScore}</span>
+                    </div>
+                  )}
+                  {zscaler?.zdx && zscaler.zdx.alerts.activeAlerts > 0 && (
+                    <div class="exec-stat-row">
+                      <span class="exec-stat-label"><span class="metric-source">ZS</span> DX Alerts</span>
+                      <span class="exec-stat-value severity-high">{zscaler.zdx.alerts.activeAlerts}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 4: Action Items */}
+            <div class="col-12">
+              <div class="card card-compact exec-actions">
+                <div class="card-title">Areas Needing Attention</div>
+                {actionItems.length > 0 ? (
+                  actionItems.map((item, i) => (
+                    <div class="exec-action-item" key={i}>
+                      <span class={`badge badge-${item.severity}`}>{item.severity.toUpperCase()}</span>
+                      <span class="exec-action-text">{item.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div class="exec-all-clear">No critical action items. All systems operating within acceptable thresholds.</div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* ═══ CROWDSTRIKE TAB ═══ */}
-          <div id="tab-crowdstrike" class="tab-content active">
+          <div id="tab-crowdstrike" class="tab-content">
             {crowdstrike ? (
               <>
                 {/* Row 1: Key Metrics */}
@@ -896,59 +1385,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
                     </div>
                   </div>
 
-                  {/* Row 3: ZINS Analytics (if available) */}
-                  {zscaler?.analytics?.webTraffic && (
-                    <div class="card card-compact col-12">
-                      <div class="card-title">Z-Insights Traffic Analytics (7d)</div>
-                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
-                        <MetricCard label="Total Transactions" value={zscaler.analytics.webTraffic.totalTransactions.toLocaleString()} compact />
-                        {zscaler.analytics.webTraffic.byLocation.map((loc) => (
-                          <MetricCard key={loc.name} label={loc.name} value={loc.total.toLocaleString()} compact />
-                        ))}
-                      </div>
-                      {zscaler.analytics.webTraffic.protocols.length > 0 && (
-                        <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
-                          {zscaler.analytics.webTraffic.protocols.map((p) => (
-                            <span key={p.protocol} class="badge">{p.protocol}: {p.count.toLocaleString()}</span>
-                          ))}
-                        </div>
-                      )}
-                      {zscaler.analytics.webTraffic.threatClasses.length > 0 && (
-                        <div style="margin-top: var(--sp-2); display: flex; gap: 4px; flex-wrap: wrap;">
-                          {zscaler.analytics.webTraffic.threatClasses.map((t) => (
-                            <span key={t.category} class="badge badge-critical">{t.category}: {t.count.toLocaleString()}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {zscaler?.analytics?.cyberSecurity && (
-                    <div class="card card-compact col-12">
-                      <div class="card-title">Cyber Security Incidents (7d)</div>
-                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
-                        <MetricCard label="Total Incidents" value={zscaler.analytics.cyberSecurity.totalIncidents.toLocaleString()} compact
-                          severity={zscaler.analytics.cyberSecurity.totalIncidents > 100 ? 'high' : zscaler.analytics.cyberSecurity.totalIncidents > 0 ? 'medium' : undefined} />
-                        {zscaler.analytics.cyberSecurity.byCategory.slice(0, 6).map((c) => (
-                          <MetricCard key={c.name} label={c.name.replace(/_/g, ' ')} value={c.total.toLocaleString()} compact
-                            severity={c.name === 'PHISHING' || c.name === 'MALWARE_SITE' ? 'critical' : undefined} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {zscaler?.analytics?.shadowIT && (
-                    <div class="card card-compact col-12">
-                      <div class="card-title">Shadow IT Discovery (7d)</div>
-                      <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
-                        <MetricCard label="Apps Discovered" value={String(zscaler.analytics.shadowIT.totalApps)} compact />
-                        {zscaler.analytics.shadowIT.apps.filter(a => a.sanctioned_state !== 'SANCTIONED').slice(0, 4).map((a) => (
-                          <MetricCard key={a.application} label={a.application.replace(/_/g, ' ')} value={`Risk: ${a.risk_index}`} compact
-                            severity={a.risk_index >= 4 ? 'critical' : a.risk_index >= 3 ? 'high' : undefined} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Row 4: Protection Status */}
+                  {/* Row 3: Protection Status */}
                   <div class="card card-compact col-12">
                     <div class="card-title">Protection Status</div>
                     <div style="display: flex; gap: 4px; flex-wrap: wrap;">
@@ -1247,6 +1684,174 @@ export const Dashboard: FC<Props> = ({ data }) => {
             })() : (
               <div class="col-12">
                 <p class="no-data">ZDX not configured or no data available</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ ZINS ANALYTICS TAB ═══ */}
+          <div id="tab-zins" class="tab-content">
+            {zscaler?.analytics ? (() => {
+              const analytics = zscaler.analytics;
+              const wt = analytics.webTraffic;
+              const cs = analytics.cyberSecurity;
+              const si = analytics.shadowIT;
+              const maxLocation = wt ? Math.max(...wt.byLocation.map(l => l.total), 1) : 1;
+
+              return (
+                <>
+                  {/* Row 1: Key Metrics */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
+                      <MetricCard label="Total Transactions" value={wt ? formatCompact(wt.totalTransactions) : 'N/A'} source="ZS" compact />
+                      <MetricCard label="Cyber Incidents" value={cs ? formatCompact(cs.totalIncidents) : 'N/A'} source="ZS" compact
+                        severity={cs && cs.totalIncidents > 100 ? 'high' : cs && cs.totalIncidents > 0 ? 'medium' : undefined} />
+                      <MetricCard label="Shadow IT Apps" value={si ? String(si.totalApps) : 'N/A'} source="ZS" compact />
+                      <MetricCard label="Threat Categories" value={wt ? String(wt.threatSuperCategories.length) : '0'} compact
+                        severity={wt && wt.threatSuperCategories.length > 5 ? 'high' : wt && wt.threatSuperCategories.length > 0 ? 'medium' : undefined} />
+                      <MetricCard label="Protocols Seen" value={wt ? String(wt.protocols.length) : '0'} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 2: Web Traffic + Cyber Security */}
+                  {wt && (
+                    <div class="card card-compact col-6">
+                      <div class="card-title">Web Traffic by Protocol</div>
+                      {wt.protocols.length > 0 && (
+                        <DonutChart
+                          segments={wt.protocols.slice(0, 6).map((p, i) => ({
+                            label: p.protocol,
+                            value: p.count,
+                            color: ['var(--accent)', 'var(--healthy)', 'var(--medium)', '#8b5cf6', '#ec4899', '#f97316'][i] ?? 'var(--accent)',
+                          }))}
+                          centerLabel="Protocols"
+                        />
+                      )}
+                      {wt.byLocation.length > 0 && (
+                        <div style="margin-top: var(--sp-4);">
+                          <div class="stat-label" style="margin-bottom: var(--sp-2);">Traffic by Location</div>
+                          {wt.byLocation.slice(0, 8).map((loc) => (
+                            <div class="hbar-row" key={loc.name}>
+                              <span class="hbar-label">{loc.name}</span>
+                              <div class="hbar-track">
+                                <div class="hbar-fill" style={`width: ${Math.round((loc.total / maxLocation) * 100)}%`} />
+                              </div>
+                              <span class="hbar-value">{formatCompact(loc.total)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {cs && (
+                    <div class="card card-compact col-6">
+                      <div class="card-title">Cyber Security Incidents (7d)</div>
+                      <div style="margin-bottom: var(--sp-3);">
+                        <span class={`exec-big-value ${cs.totalIncidents > 100 ? 'severity-high' : cs.totalIncidents > 0 ? 'severity-medium' : ''}`} style="font-size: 1.8rem;">
+                          {formatCompact(cs.totalIncidents)}
+                        </span>
+                        <span class="stat-label" style="margin-left: var(--sp-2);">total incidents</span>
+                      </div>
+                      {cs.byCategory.length > 0 && (
+                        <DonutChart
+                          segments={cs.byCategory.slice(0, 6).map((c, i) => ({
+                            label: c.name.replace(/_/g, ' '),
+                            value: c.total,
+                            color: c.name === 'PHISHING' || c.name === 'MALWARE_SITE'
+                              ? 'var(--critical)'
+                              : ['var(--high)', 'var(--medium)', '#8b5cf6', '#ec4899', '#f97316', 'var(--accent)'][i] ?? 'var(--accent)',
+                          }))}
+                          centerLabel="Categories"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Row 3: Threat Landscape + Shadow IT */}
+                  {wt && wt.threatSuperCategories.length > 0 && (
+                    <div class="card card-compact col-6">
+                      <div class="card-title">Threat Super Categories</div>
+                      <DonutChart
+                        segments={wt.threatSuperCategories.slice(0, 6).map((t, i) => ({
+                          label: t.category,
+                          value: t.count,
+                          color: ['var(--critical)', 'var(--high)', 'var(--medium)', '#8b5cf6', '#ec4899', 'var(--accent)'][i] ?? 'var(--accent)',
+                        }))}
+                        centerLabel="Threats"
+                      />
+                      {wt.threatClasses.length > 0 && (
+                        <div style="margin-top: var(--sp-3); display: flex; gap: 4px; flex-wrap: wrap;">
+                          {wt.threatClasses.map((t) => (
+                            <span key={t.category} class="badge badge-critical">{t.category}: {formatCompact(t.count)}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {si && (
+                    <div class="card card-compact col-6">
+                      <div class="card-title">Shadow IT Discovery ({si.totalApps} apps)</div>
+                      <div class="table-wrapper">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Application</th>
+                              <th>Category</th>
+                              <th>Risk</th>
+                              <th>State</th>
+                              <th>Data</th>
+                              <th>Users</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {si.apps.slice(0, 15).map((app) => (
+                              <tr key={app.application}>
+                                <td>{app.application.replace(/_/g, ' ')}</td>
+                                <td>{app.application_category.replace(/_/g, ' ')}</td>
+                                <td>
+                                  <span class={app.risk_index >= 4 ? 'severity-critical' : app.risk_index >= 3 ? 'severity-high' : app.risk_index >= 2 ? 'severity-medium' : ''}>
+                                    {app.risk_index}
+                                  </span>
+                                  <span class="risk-bar">
+                                    <span class="risk-bar-fill" style={`width: ${Math.min(100, app.risk_index * 20)}%; background: ${app.risk_index >= 4 ? 'var(--critical)' : app.risk_index >= 3 ? 'var(--high)' : app.risk_index >= 2 ? 'var(--medium)' : 'var(--healthy)'}`} />
+                                  </span>
+                                </td>
+                                <td>
+                                  <span class={`badge ${app.sanctioned_state === 'SANCTIONED' ? 'badge-low' : 'badge-critical'}`}>
+                                    {app.sanctioned_state}
+                                  </span>
+                                </td>
+                                <td style="font-family: var(--font-mono); font-size: 0.8rem;">{formatBytes(app.data_consumed)}</td>
+                                <td style="font-family: var(--font-mono);">{app.authenticated_users}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Row 4: Location Breakdown (full width) */}
+                  {wt && wt.byLocation.length > 0 && (
+                    <div class="card card-compact col-12">
+                      <div class="card-title">Traffic Distribution by Location</div>
+                      {wt.byLocation.map((loc) => (
+                        <div class="hbar-row" key={loc.name}>
+                          <span class="hbar-label">{loc.name}</span>
+                          <div class="hbar-track">
+                            <div class="hbar-fill" style={`width: ${Math.round((loc.total / maxLocation) * 100)}%`} />
+                          </div>
+                          <span class="hbar-value">{formatCompact(loc.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">Z-Insights analytics not available. Requires OneAPI configuration.</p>
               </div>
             )}
           </div>

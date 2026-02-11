@@ -141,9 +141,12 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine.
 
 ### Views
-- **Dashboard.tsx** — Main dashboard with tabs: CrowdStrike, Microsoft, Salesforce, ZIA, ZPA, ZDX, Meraki. MetricCards with source labels and trend indicators. Security Score calculated from CS + MS alert severity weights. ZIA tab includes Z-Insights analytics cards (traffic, cyber incidents, shadow IT).
+- **Dashboard.tsx** — Main dashboard with 9 tabs: Executive, CrowdStrike, Microsoft, Salesforce, ZIA, ZPA, ZDX, ZINS, Meraki. Executive tab is the default active tab.
+  - **Executive tab** — CEO-friendly cross-platform overview: 4 headline KPIs (Security Score, Active Threats, Compliance Rate, Network Uptime), 5 health indicator gauges (Asset Health, Active Threats, Compliance Posture, Connectivity, Service Delivery) aggregating metrics across CS/MS/SF/ZS/MK, 6 platform summary cards, and auto-generated action items from threshold checks.
+  - **ZINS tab** — Dedicated Z-Insights analytics: DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
+  - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
-- **Layout.tsx** — Base HTML shell with all CSS.
+- **Layout.tsx** — Base HTML shell with all CSS. Includes executive-specific styles (`.exec-headline`, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), and health indicator cards (`.exec-health-card`).
 
 ## API Routes
 
