@@ -29,6 +29,21 @@ pnpm-debug.log*
 # Testing
 coverage/
 
+# Screenshots
+*.png
+
+# Planning docs (not part of codebase)
+CSPlan.md
+Intune Task.md
+MSKPIS.md
+Meraki.md
+Zscaler.md
+Zscaler2.md
+Salesforce Service Cloud Integration Specification.md
+
+# Stray lockfiles
+apps/worker/package-lock.json
+
 # Misc
 *.tgz
 .turbo
