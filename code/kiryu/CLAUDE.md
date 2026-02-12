@@ -141,7 +141,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
 - **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV (errors logged). Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
-- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). `ZscalerTrends` includes 12 fields: ZPA health, ZIA rules, ZDX scores, Risk360, and ZINS analytics (traffic, incidents, shadow IT, threat categories). Uses `Record<string, unknown>` for D1 rows (no `any`).
+- **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). `ZscalerTrends` includes 12 fields: ZPA health, ZIA rules, ZDX scores, Risk360, and ZINS analytics (traffic, incidents, shadow IT, threat categories). `MicrosoftTrends` includes 9 fields: alerts active, secure score, risky users, incidents open, and 5 Intune metrics (devices total, compliant, non-compliant, stale, encrypted). Uses `Record<string, unknown>` for D1 rows (no `any`).
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine. Live API fallback has 25s timeout.
 
 ### Views
@@ -149,6 +149,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **Top KPI strip** — 5 actionable metrics (Critical Alerts, Open Incidents, Risky Users, Open Cases, SLA). Informational metrics (Secure Score, Endpoints, ZDX Score) live in platform tabs, not the top bar.
   - **Platform status row** — Horizontal badges below KPI strip showing connected platforms with health dots (green/red/gray).
   - **Executive tab** — CEO-friendly cross-platform overview: 3 headline gauges (Security Score, Compliance, Network Uptime), 5 health indicator gauges (Asset Health, Threat Posture, Compliance Posture, Connectivity, Service Delivery) aggregating metrics across CS/MS/SF/ZS/MK, 6 platform summary cards, and auto-generated action items from threshold checks.
+  - **Intune tab** — Microsoft Intune device management: 6 KPI MetricCards (Managed Devices, Compliant %, Non-Compliant, Stale 7d+, Detected Apps, Policies) with D1-backed trends. Row 2: OS breakdown DonutChart, Compliance state DonutChart, Device Health gauges (Compliant %, Encrypted %). Row 3: Top Detected Apps table (name, publisher, devices) and Compliance Policies table (name, pass rate bar, success, failed). Intune compliance feeds into Executive tab's Compliance Posture health indicator. Action items: stale >10 = warning, non-compliant >20% = high.
   - **ZINS tab** — Dedicated Z-Insights analytics with D1-backed trend indicators on key metrics (Total Transactions, Cyber Incidents, Shadow IT Apps, Threat Categories). DonutCharts for protocols/threat categories/incidents, horizontal bar charts for traffic by location, Shadow IT table with risk bars and formatBytes() data columns.
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
@@ -212,6 +213,12 @@ SALESFORCE_CLIENT_SECRET     # Connected App Consumer Secret
 AZURE_TENANT_ID              # Entra ID Directory (tenant) ID
 AZURE_CLIENT_ID              # App Registration Application (client) ID
 AZURE_CLIENT_SECRET          # App Registration client secret value
+# Required API permissions (Application, with admin consent):
+#   Graph: SecurityAlert.Read.All, SecurityEvents.Read.All, IdentityRiskyUser.Read.All,
+#          SecurityIncident.Read.All, DeviceManagementManagedDevices.Read.All,
+#          DeviceManagementConfiguration.Read.All
+#   Defender: WindowsDefenderATP Alert.Read.All, Machine.Read.All
+#   Azure Mgmt: (reader role on subscription for Cloud Defender assessments)
 
 # Dashboard API (for programmatic access)
 DASHBOARD_API_KEY

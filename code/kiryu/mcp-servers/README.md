@@ -4,13 +4,13 @@ This directory contains MCP (Model Context Protocol) servers that allow Claude D
 
 ## Overview
 
-MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 53 tools covering all integrated platforms.
+MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 57 tools covering all integrated platforms.
 
 ## Security Dashboard MCP Server (`security-dashboard/`)
 
 A unified MCP server that connects to your Security Dashboard Worker API.
 
-### Tools (53)
+### Tools (57)
 
 #### Dashboard & Reports (7)
 | Tool | Description |
@@ -39,15 +39,19 @@ A unified MCP server that connects to your Security Dashboard Worker API.
 | `get_crowdstrike_diagnostic` | Test all CrowdStrike API scopes, report availability |
 | `get_historical_trends` | D1 trend data with period comparisons |
 
-#### Microsoft (6)
+#### Microsoft (10)
 | Tool | Description |
 |------|-------------|
-| `get_microsoft_summary` | Full Microsoft security summary (all 8 modules) |
+| `get_microsoft_summary` | Full Microsoft security summary (all 11 modules) |
 | `get_microsoft_secure_score` | Microsoft 365/Azure secure score |
 | `get_microsoft_alerts` | Entra / Graph Security alerts |
 | `get_microsoft_defender_alerts` | Defender for Endpoint alerts |
 | `get_microsoft_compliance` | Intune device compliance status |
 | `get_microsoft_recommendations` | Cloud Defender security assessments |
+| `get_intune_summary` | Intune full summary (devices, policies, detected apps) |
+| `get_intune_devices` | Managed device analytics: compliance, OS, stale, encrypted |
+| `get_intune_policies` | Compliance policy pass rates and success/failed counts |
+| `get_intune_detected_apps` | Top detected applications by device count |
 
 #### Zscaler (9)
 | Tool | Description |
@@ -170,6 +174,10 @@ Once configured, you can ask Claude questions like:
 - "What shadow IT apps did Zscaler discover?"
 - "Run a custom ZINS analytics query for web traffic"
 - "Are there any Abnormal Security cases to investigate?"
+- "How many Intune devices are non-compliant?"
+- "What's the compliance policy pass rate?"
+- "Show me the top detected apps across managed devices"
+- "Are there stale Intune devices that haven't synced?"
 
 ## Development
 
