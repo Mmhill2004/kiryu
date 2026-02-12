@@ -141,20 +141,37 @@ export class AnalyticsClient {
   private async graphqlFetch<T>(query: string, variables: Record<string, unknown> = {}): Promise<T | null> {
     const endpoint = this.auth.getAnalyticsBaseUrl();
     const token = await this.auth.getOneApiToken();
+    const body = JSON.stringify({ query, variables });
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
 
     try {
-      const resp = await fetch(endpoint, {
+      let resp = await fetch(endpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query, variables }),
+        body,
         signal: controller.signal,
       });
+
+      // Auto-retry once on 401 with a fresh token
+      if (resp.status === 401) {
+        console.warn('ZINS GraphQL got 401 — refreshing OneAPI token and retrying');
+        await this.auth.invalidateOneApiToken();
+        const freshToken = await this.auth.getOneApiToken(true);
+        resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${freshToken}`,
+            'Content-Type': 'application/json',
+          },
+          body,
+          signal: controller.signal,
+        });
+      }
 
       if (!resp.ok) {
         const text = await resp.text();

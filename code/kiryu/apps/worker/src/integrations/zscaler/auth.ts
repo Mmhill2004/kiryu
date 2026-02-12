@@ -62,9 +62,11 @@ export class ZscalerAuth {
 
   // --- OneAPI OAuth2 ---
 
-  async getOneApiToken(): Promise<string> {
-    const cached = await this.kv.get(KV_KEY_ONEAPI);
-    if (cached) return cached;
+  async getOneApiToken(forceRefresh = false): Promise<string> {
+    if (!forceRefresh) {
+      const cached = await this.kv.get(KV_KEY_ONEAPI);
+      if (cached) return cached;
+    }
 
     if (this.pendingOneApi) return this.pendingOneApi;
     this.pendingOneApi = this.fetchOneApiToken();
@@ -73,6 +75,11 @@ export class ZscalerAuth {
     } finally {
       this.pendingOneApi = null;
     }
+  }
+
+  /** Delete cached OneAPI token so next call fetches fresh */
+  async invalidateOneApiToken(): Promise<void> {
+    await this.kv.delete(KV_KEY_ONEAPI);
   }
 
   getOneApiTokenUrl(): string {
@@ -267,15 +274,24 @@ export class ZscalerAuth {
     try {
       let resp: Response;
       if (this.isOneApiConfigured()) {
-        // OneAPI gateway: prefix with /zia
         const gatewayUrl = this.getOneApiBaseUrl();
         const token = await this.getOneApiToken();
         resp = await fetch(`${gatewayUrl}/zia${endpoint}`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           signal: controller.signal,
         });
+
+        // Auto-retry once on 401 with a fresh token
+        if (resp.status === 401) {
+          console.warn(`ZIA ${endpoint} got 401 — refreshing OneAPI token and retrying`);
+          await this.invalidateOneApiToken();
+          const freshToken = await this.getOneApiToken(true);
+          resp = await fetch(`${gatewayUrl}/zia${endpoint}`, {
+            headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+            signal: controller.signal,
+          });
+        }
       } else {
-        // Legacy: session cookie to direct ZIA API
         const baseUrl = this.getZiaBaseUrl();
         const cookie = await this.getZiaSession();
         resp = await fetch(`${baseUrl}${endpoint}`, {
@@ -302,15 +318,24 @@ export class ZscalerAuth {
     try {
       let resp: Response;
       if (this.isOneApiConfigured()) {
-        // OneAPI gateway: prefix with /zpa
         const gatewayUrl = this.getOneApiBaseUrl();
         const token = await this.getOneApiToken();
         resp = await fetch(`${gatewayUrl}/zpa${endpoint}`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           signal: controller.signal,
         });
+
+        // Auto-retry once on 401 with a fresh token
+        if (resp.status === 401) {
+          console.warn(`ZPA ${endpoint} got 401 — refreshing OneAPI token and retrying`);
+          await this.invalidateOneApiToken();
+          const freshToken = await this.getOneApiToken(true);
+          resp = await fetch(`${gatewayUrl}/zpa${endpoint}`, {
+            headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+            signal: controller.signal,
+          });
+        }
       } else {
-        // Legacy: dedicated ZPA token to direct ZPA API
         const baseUrl = this.getZpaBaseUrl();
         const token = await this.getZpaToken();
         resp = await fetch(`${baseUrl}${endpoint}`, {
@@ -346,15 +371,24 @@ export class ZscalerAuth {
     try {
       let resp: Response;
       if (this.isOneApiConfigured()) {
-        // OneAPI gateway: prefix with /zdx/v1 (legacy base already includes /v1)
         const gatewayUrl = this.getOneApiBaseUrl();
         const token = await this.getOneApiToken();
         resp = await fetch(`${gatewayUrl}/zdx/v1${endpoint}`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           signal: controller.signal,
         });
+
+        // Auto-retry once on 401 with a fresh token
+        if (resp.status === 401) {
+          console.warn(`ZDX ${endpoint} got 401 — refreshing OneAPI token and retrying`);
+          await this.invalidateOneApiToken();
+          const freshToken = await this.getOneApiToken(true);
+          resp = await fetch(`${gatewayUrl}/zdx/v1${endpoint}`, {
+            headers: { Authorization: `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+            signal: controller.signal,
+          });
+        }
       } else {
-        // Legacy: dedicated ZDX token to direct ZDX API
         const baseUrl = this.getZdxBaseUrl();
         const token = await this.getZdxToken();
         resp = await fetch(`${baseUrl}${endpoint}`, {
