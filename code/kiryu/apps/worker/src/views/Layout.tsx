@@ -1,7 +1,7 @@
 import type { FC, PropsWithChildren } from 'hono/jsx';
 import { raw } from 'hono/html';
 
-export const Layout: FC<PropsWithChildren<{ title?: string }>> = ({ children, title = 'Security Dashboard' }) => {
+export const Layout: FC<PropsWithChildren<{ title?: string; scrollable?: boolean }>> = ({ children, title = 'Security Dashboard', scrollable }) => {
   return (
     <html lang="en">
       <head>
@@ -13,6 +13,7 @@ export const Layout: FC<PropsWithChildren<{ title?: string }>> = ({ children, ti
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
         <style>{raw(styles)}</style>
+        {scrollable && <style>{raw(`html, body { height: auto !important; overflow-y: auto !important; }`)}</style>}
       </head>
       <body>
         <div class="grid-bg"></div>

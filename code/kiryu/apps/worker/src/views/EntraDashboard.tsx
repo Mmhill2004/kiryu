@@ -49,7 +49,7 @@ function formatRiskType(type: string): string {
 
 export const EntraDashboard: FC<Props> = ({ data, error }) => {
   return (
-    <Layout title="Entra ID Security">
+    <Layout title="Entra ID Security" scrollable>
       <header>
         <div class="header-left">
           <div class="logo-mark">

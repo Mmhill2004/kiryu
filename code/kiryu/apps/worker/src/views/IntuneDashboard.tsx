@@ -25,7 +25,7 @@ function encryptionColor(rate: number): string {
 
 export const IntuneDashboard: FC<Props> = ({ data, error }) => {
   return (
-    <Layout title="Intune Device Management">
+    <Layout title="Intune Device Management" scrollable>
       <header>
         <div class="header-left">
           <div class="logo-mark">
