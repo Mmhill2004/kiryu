@@ -86,7 +86,7 @@ uiRoutes.get('/', async (c) => {
           await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
           dataSource = 'live';
         } else {
-          console.error('CrowdStrike fetch timed out (25s)');
+          console.error('CrowdStrike fetch timed out (10s)');
           platforms.push({ platform: 'crowdstrike', status: 'error', last_sync: null, error_message: 'Request timeout' });
         }
       } catch (error) {
@@ -120,7 +120,7 @@ uiRoutes.get('/', async (c) => {
           platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
           await cache.set(sfCacheKey, salesforce, CACHE_TTL.DASHBOARD_DATA);
         } else {
-          console.error('Salesforce fetch timed out (25s)');
+          console.error('Salesforce fetch timed out (10s)');
           platforms.push({ platform: 'salesforce', status: 'error', last_sync: null, error_message: 'Request timeout' });
         }
       } catch (error) {
@@ -154,7 +154,7 @@ uiRoutes.get('/', async (c) => {
           platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: new Date().toISOString() });
           await cache.set(msCacheKey, microsoft, CACHE_TTL.DASHBOARD_DATA);
         } else {
-          console.error('Microsoft fetch timed out (25s)');
+          console.error('Microsoft fetch timed out (10s)');
           platforms.push({ platform: 'microsoft', status: 'error', last_sync: null, error_message: 'Request timeout' });
         }
       } catch (error) {
@@ -204,7 +204,7 @@ uiRoutes.get('/', async (c) => {
             await cache.set(zsCacheKey, zscaler, CACHE_TTL.DASHBOARD_DATA);
           }
         } else {
-          console.error('Zscaler fetch timed out (25s)');
+          console.error('Zscaler fetch timed out (10s)');
           platforms.push({ platform: 'zscaler', status: 'error', last_sync: null, error_message: 'Request timeout' });
         }
       } catch (error) {
@@ -237,7 +237,7 @@ uiRoutes.get('/', async (c) => {
           platforms.push({ platform: 'meraki', status: 'healthy', last_sync: new Date().toISOString() });
           await cache.set(mkCacheKey, meraki, CACHE_TTL.DASHBOARD_DATA);
         } else {
-          console.error('Meraki fetch timed out (25s)');
+          console.error('Meraki fetch timed out (10s)');
           platforms.push({ platform: 'meraki', status: 'error', last_sync: null, error_message: 'Request timeout' });
         }
       } catch (error) {

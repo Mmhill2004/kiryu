@@ -29,7 +29,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
   └───────┘     └─────────┘     └───────┘
 ```
 
-**Data flow:** Cron syncs every 15 min → stores daily snapshots in D1 → KV caches dashboard data (5 min TTL) → Dashboard loads from KV cache first. On the 1st of each month, cron generates an HTML executive report and stores it in R2.
+**Data flow:** Cron syncs every 15 min → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL) → Dashboard/Intune/Entra pages read from KV only (instant). Live API calls only happen on explicit `?refresh=true`. On the 1st of each month, cron generates an HTML executive report and stores it in R2.
 
 ## Current Integration Status
 
@@ -51,11 +51,11 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Interactivity**: htmx
 - **Typography**: Outfit (UI) + JetBrains Mono (data values)
 - **Database**: Cloudflare D1 (SQLite)
-- **Cache**: Cloudflare KV (5 min dashboard TTL, 29 min CS OAuth, 118 min SF OAuth, 58 min per-scope MS OAuth)
+- **Cache**: Cloudflare KV (20 min cron-written dashboard TTL, 5 min live-fetch fallback TTL, 29 min CS OAuth, 118 min SF OAuth, 58 min per-scope MS OAuth)
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 67 tools
+- **AI Integration**: MCP server with 69 tools
 
 ## Common Commands
 
@@ -123,17 +123,17 @@ kiryu/
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
 ├── packages/db/migrations/   # D1 SQL migrations (9 files)
-└── mcp-servers/security-dashboard/  # MCP server (67 tools)
+└── mcp-servers/security-dashboard/  # MCP server (69 tools)
 ```
 
 ## Key Files
 
 ### Integration Clients (`integrations/*/client.ts`)
-All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`. All clients have AbortController timeouts (10s OAuth, 20s data). All route handlers check `isConfigured()` before calling client methods.
+All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`. All clients have AbortController timeouts (10s OAuth, 12–20s data). All route handlers check `isConfigured()` before calling client methods.
 
 - **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
 - **Microsoft** — 11 modules across 3 API scopes (Graph v1.0, Graph beta, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Has `paginateGraph()` helper for OData `@odata.nextLink` pagination. Intune summary methods: `getIntuneDeviceAnalytics()`, `getIntunePolicyAnalytics()`, `getIntuneDetectedApps()`, `getIntuneSummary()`. Detailed Intune methods (for `/intune` page): `getManagedDevices()` (full v1.0 device list with ownership/jailbreak/supervised), `getManagedDevicesBeta()` (beta API with `hardwareInformation.lastRebootDateTime`), `getCompliancePolicySummary()`, `getCompliancePolicies()`, `getPolicyDeviceStatusSummary()`, `getIntuneDetailedSummary()` (orchestrates all with OS version currency, encryption, reboot hygiene, stale detection). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
-- **Entra ID** — 8 data domains (Risky Users, Risk Detections, MFA Registration, Conditional Access, Privileged Roles, User Hygiene, App Credentials, Sign-in Activity). Separate client from Microsoft — same Azure credentials, clean domain separation. KV-cached OAuth with in-flight dedup. AbortController timeouts (10s auth, 20s data). OData pagination with maxPages safety cap. Beta API for signInActivity on users.
+- **Entra ID** — 8 data domains (Risky Users, Risk Detections, MFA Registration, Conditional Access, Privileged Roles, User Hygiene, App Credentials, Sign-in Activity). Separate client from Microsoft — same Azure credentials, clean domain separation. KV-cached OAuth with in-flight dedup. AbortController timeouts (10s auth, 12s data). OData pagination with maxPages safety cap (5 pages for user lists). Beta API for signInActivity on users.
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
 - **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data. **All OneAPI fetch methods (`ziaFetch`, `zpaFetch`, `zdxFetch`, ZINS `graphqlFetch`) auto-retry once on 401** — invalidate cached token, fetch fresh, retry. This handles Zscaler server-side token invalidation transparently.
@@ -145,7 +145,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
-- **SyncService** (`services/sync.ts`) — Cron-triggered: fetches all platforms → stores daily snapshots in D1 → invalidates KV (errors logged). Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
+- **SyncService** (`services/sync.ts`) — Cron-triggered: runs 8 parallel tasks (crowdstrike, salesforce, microsoft, zscaler, meraki, abnormal, intune, entra) → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL via `cacheDashboardData()`). Intune and Entra run as separate parallel tasks (`syncIntuneCache`, `syncEntraCache`) that pre-compute and cache their respective page data. Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
 - **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). `ZscalerTrends` includes 12 fields: ZPA health, ZIA rules, ZDX scores, Risk360, and ZINS analytics (traffic, incidents, shadow IT, threat categories). `MicrosoftTrends` includes 9 fields: alerts active, secure score, risky users, incidents open, and 5 Intune metrics (devices total, compliant, non-compliant, stale, encrypted). Uses `Record<string, unknown>` for D1 rows (no `any`).
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine. Live API fallback has 25s timeout.
 
@@ -184,7 +184,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 67 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (13, including Intune summary/devices/policies/apps/stale/reboot-needed/compliance-policies), Entra ID (7), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 69 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (13, including Intune summary/devices/policies/apps/stale/reboot-needed/compliance-policies), Entra ID (7), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -294,8 +294,8 @@ Key type patterns:
 ### Fetch Timeouts
 All external API calls have AbortController timeouts:
 - OAuth token fetches: 10s timeout
-- Data API requests: 20s timeout
-- Dashboard platform fetches: 25s timeout (in `ui.tsx`)
+- Data API requests: 12–20s timeout (Entra 12s, others 20s)
+- Dashboard platform fetches: 10s timeout (in `ui.tsx`, fallback only — normally served from cron-written KV cache)
 
 ### OAuth In-Flight Dedup
 All three OAuth clients (CS, SF, MS) deduplicate concurrent auth requests via `pendingAuth` promise tracking — prevents thundering herd on token expiry.
@@ -326,15 +326,35 @@ Key implementation details:
 
 ## Key Patterns
 
-### KV Cache-First Loading
+### Cron Pre-Caching (Primary)
 ```typescript
-// ui.tsx: try cache first, fall back to live API, then cache result
+// sync.ts: cron writes dashboard data to KV for all period keys
+private async cacheDashboardData<T>(prefix: string, data: T): Promise<void> {
+  const cache = new CacheService(this.env.CACHE);
+  await Promise.all(['24h', '7d', '30d', '90d'].map(p =>
+    cache.set(`${prefix}:${p}`, data, CACHE_TTL.SYNC_DATA)  // 20 min TTL
+  ));
+}
+```
+
+### KV Cache-First Loading (Fallback)
+```typescript
+// ui.tsx: main dashboard tries cache first, falls back to live API with 10s timeout
 const csCacheKey = `${CACHE_KEYS.CROWDSTRIKE_SUMMARY}:${period}`;  // e.g. "cs:summary:7d"
 const cached = await cache.get<CSSummary>(csCacheKey);
 if (cached && !forceRefresh) { crowdstrike = cached.data; return; }
-// Otherwise fetch live, then cache for 5 min
 crowdstrike = await csClient.getFullSummary(daysBack, 30);
 await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
+```
+
+### Cache-Only Pages (Intune, Entra)
+```typescript
+// ui.tsx: /intune and /entra read from KV only — no live API fallback on normal load
+const cached = await cache.get<EntraSummary>(cacheKey);
+if (!forceRefresh) {
+  return c.html(<EntraDashboard data={cached?.data ?? null} cachedAt={cached?.cachedAt ?? null} />);
+}
+// Live fetch only on explicit ?refresh=true
 ```
 
 ### Trend Indicators
@@ -375,7 +395,7 @@ if (!client.isConfigured()) {
 
 - **Never return raw error messages** to API clients — use generic messages and `console.error` the details server-side
 - **GraphQL queries must use variables** (not string interpolation) to prevent injection — see Cloudflare `getGatewayLogs()` as the reference pattern
-- **All fetch calls require AbortController timeouts** — 10s for OAuth, 20s for data, 25s for dashboard/report fallbacks
+- **All fetch calls require AbortController timeouts** — 10s for OAuth, 12–20s for data, 10s for dashboard fallbacks
 - **Sync cleanup loops must have a max iteration cap** — use `MAX_BATCHES` constant to prevent runaway deletes
 
 ## Accessibility
