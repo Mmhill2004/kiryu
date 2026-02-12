@@ -5,6 +5,8 @@ import { ZscalerClient } from '../integrations/zscaler/client';
 import { MicrosoftClient } from '../integrations/microsoft/client';
 import { SalesforceClient } from '../integrations/salesforce/client';
 import { MerakiClient } from '../integrations/meraki/client';
+import { EntraClient } from '../integrations/entra/client';
+import { CacheService, CACHE_KEYS, CACHE_TTL } from './cache';
 
 export interface SyncResult {
   platform: string;
@@ -35,21 +37,6 @@ export class SyncService {
 
     const syncResults = await Promise.all(syncPromises);
     results.push(...syncResults);
-
-    // Invalidate dashboard cache after sync so next page load gets fresh data
-    try {
-      const { CacheService } = await import('./cache');
-      const cacheService = new CacheService(this.env.CACHE);
-      await Promise.all([
-        cacheService.invalidatePrefix('cs:summary'),
-        cacheService.invalidatePrefix('sf:metrics'),
-        cacheService.invalidatePrefix('ms:summary'),
-        cacheService.invalidatePrefix('zs:summary'),
-        cacheService.invalidatePrefix('mk:summary'),
-      ]);
-    } catch (error) {
-      console.error('Cache invalidation after sync failed:', error);
-    }
 
     // Run data retention cleanup
     try {
@@ -117,8 +104,8 @@ export class SyncService {
 
     const client = new CrowdStrikeClient(this.env, this.env.CACHE);
 
-    // Fetch full summary (all 12 modules in parallel)
-    const fullSummary = await client.getFullSummary(7, 30);
+    // Fetch full summary (all 12 modules in parallel) — daysBack=1 for accurate daily snapshots
+    const fullSummary = await client.getFullSummary(1, 30);
     const { alerts, hosts, incidents, zta, ngsiem, overwatch, crowdScore, vulnerabilities, identity, discover, sensors } = fullSummary;
 
     let recordsSynced = 0;
@@ -273,6 +260,11 @@ export class SyncService {
       total_alerts: alerts.total,
       open_incidents: incidents.open,
     });
+
+    // Pre-cache dashboard data for instant page loads
+    try {
+      await this.cacheDashboardData(CACHE_KEYS.CROWDSTRIKE_SUMMARY, fullSummary);
+    } catch (e) { console.warn('CS cache write failed:', e); }
 
     return { platform: 'crowdstrike', status: 'success', recordsSynced };
   }
@@ -436,6 +428,11 @@ export class SyncService {
       errors: summary.errors,
     });
 
+    // Pre-cache dashboard data for instant page loads
+    try {
+      await this.cacheDashboardData(CACHE_KEYS.ZSCALER_SUMMARY, summary);
+    } catch (e) { console.warn('ZS cache write failed:', e); }
+
     return { platform: 'zscaler', status: 'success', recordsSynced };
   }
 
@@ -595,6 +592,28 @@ export class SyncService {
       errors: summary.errors,
     });
 
+    // Pre-cache dashboard data for instant page loads
+    try {
+      await this.cacheDashboardData(CACHE_KEYS.MICROSOFT_SUMMARY, summary);
+    } catch (e) { console.warn('MS cache write failed:', e); }
+
+    // Pre-compute Intune detailed summary for /intune page
+    try {
+      const intuneDetail = await client.getIntuneDetailedSummary();
+      const cache = new CacheService(this.env.CACHE);
+      await cache.set('intune:detailed:summary', intuneDetail, CACHE_TTL.SYNC_DATA);
+    } catch (e) { console.warn('Intune pre-compute failed:', e); }
+
+    // Pre-compute Entra summary for /entra page
+    try {
+      const entraClient = new EntraClient(this.env);
+      if (entraClient.isConfigured()) {
+        const entraSummary = await entraClient.getEntraSummary();
+        const cache = new CacheService(this.env.CACHE);
+        await cache.set('entra:summary', entraSummary, CACHE_TTL.SYNC_DATA);
+      }
+    } catch (e) { console.warn('Entra pre-compute failed:', e); }
+
     return { platform: 'microsoft', status: 'success', recordsSynced };
   }
 
@@ -718,6 +737,11 @@ export class SyncService {
       console.error('Error storing ticket_metrics_daily:', error);
     }
 
+    // Pre-cache dashboard data for instant page loads
+    try {
+      await this.cacheDashboardData(CACHE_KEYS.SALESFORCE_METRICS, metrics);
+    } catch (e) { console.warn('SF cache write failed:', e); }
+
     return { platform: 'salesforce', status: 'success', recordsSynced };
   }
 
@@ -784,7 +808,24 @@ export class SyncService {
       errors: summary.errors,
     });
 
+    // Pre-cache dashboard data for instant page loads
+    try {
+      await this.cacheDashboardData(CACHE_KEYS.MERAKI_SUMMARY, summary);
+    } catch (e) { console.warn('MK cache write failed:', e); }
+
     return { platform: 'meraki', status: 'success', recordsSynced };
+  }
+
+  /** Write data to KV under all period-specific keys so dashboard always has a cache hit */
+  private async cacheDashboardData<T>(prefix: string, data: T): Promise<void> {
+    const cache = new CacheService(this.env.CACHE);
+    const ttl = CACHE_TTL.SYNC_DATA;
+    await Promise.all([
+      cache.set(`${prefix}:24h`, data, ttl),
+      cache.set(`${prefix}:7d`, data, ttl),
+      cache.set(`${prefix}:30d`, data, ttl),
+      cache.set(`${prefix}:90d`, data, ttl),
+    ]);
   }
 
   private async cleanupOldData(): Promise<void> {

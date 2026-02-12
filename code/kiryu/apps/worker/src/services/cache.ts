@@ -71,7 +71,8 @@ export const CACHE_KEYS = {
 } as const;
 
 export const CACHE_TTL = {
-  DASHBOARD_DATA: 300,      // 5 minutes
+  DASHBOARD_DATA: 300,      // 5 minutes (fallback from ui.tsx live fetches)
+  SYNC_DATA: 1200,          // 20 minutes (cron writes, covers 15-min interval)
   OAUTH_TOKEN_CS: 1740,     // 29 minutes (CS tokens last 30 min)
   OAUTH_TOKEN_SF: 7080,     // 118 minutes (SF tokens last ~2 hours)
   OAUTH_TOKEN_MS: 3480,     // 58 minutes (MS tokens last ~60 min, per-scope)
