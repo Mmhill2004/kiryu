@@ -220,61 +220,58 @@ export const IntuneDashboard: FC<Props> = ({ data, error }) => {
               </div>
             </div>
 
-            {/* Row 3: OS Version Currency */}
+            {/* Row 3: OS Version Currency — each platform gets its own card */}
             {data.osVersions.windows.length > 0 && (
               <div class="card col-6">
                 <div class="card-title">Windows OS Versions</div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                  {data.osVersions.windows.slice(0, 8).map((v) => (
+                  {data.osVersions.windows.slice(0, 10).map((v) => (
                     <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
-                      <span class="stat-label" style="width: 140px; font-family: var(--font-mono); font-size: 0.8rem;">{v.version}</span>
+                      <span class="stat-label" style="min-width: 120px; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap;">{v.version}</span>
                       <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
                         <div style={`width: ${v.percentage}%; height: 100%; background: #0078d4; border-radius: 4px;`}></div>
                       </div>
-                      <span class="stat-value" style="width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
-                      <span class="stat-label" style="width: 36px; text-align: right;">{v.percentage}%</span>
+                      <span class="stat-value" style="min-width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
+                      <span class="stat-label" style="min-width: 36px; text-align: right;">{v.percentage}%</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {(data.osVersions.macos.length > 0 || data.osVersions.ios.length > 0) && (
+            {data.osVersions.macos.length > 0 && (
               <div class="card col-6">
-                {data.osVersions.macos.length > 0 && (
-                  <div>
-                    <div class="card-title">macOS Versions</div>
-                    <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
-                      {data.osVersions.macos.slice(0, 5).map((v) => (
-                        <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
-                          <span class="stat-label" style="width: 100px; font-family: var(--font-mono); font-size: 0.8rem;">{v.version}</span>
-                          <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
-                            <div style={`width: ${v.percentage}%; height: 100%; background: #555; border-radius: 4px;`}></div>
-                          </div>
-                          <span class="stat-value" style="width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
-                          <span class="stat-label" style="width: 36px; text-align: right;">{v.percentage}%</span>
-                        </div>
-                      ))}
+                <div class="card-title">macOS Versions</div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  {data.osVersions.macos.slice(0, 10).map((v) => (
+                    <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
+                      <span class="stat-label" style="min-width: 120px; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap;">{v.version}</span>
+                      <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
+                        <div style={`width: ${v.percentage}%; height: 100%; background: #555; border-radius: 4px;`}></div>
+                      </div>
+                      <span class="stat-value" style="min-width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
+                      <span class="stat-label" style="min-width: 36px; text-align: right;">{v.percentage}%</span>
                     </div>
-                  </div>
-                )}
-                {data.osVersions.ios.length > 0 && (
-                  <div>
-                    <div class="card-title">iOS / iPadOS Versions</div>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
-                      {data.osVersions.ios.slice(0, 5).map((v) => (
-                        <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
-                          <span class="stat-label" style="width: 100px; font-family: var(--font-mono); font-size: 0.8rem;">{v.version}</span>
-                          <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
-                            <div style={`width: ${v.percentage}%; height: 100%; background: #a3aaae; border-radius: 4px;`}></div>
-                          </div>
-                          <span class="stat-value" style="width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
-                          <span class="stat-label" style="width: 36px; text-align: right;">{v.percentage}%</span>
-                        </div>
-                      ))}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.osVersions.ios.length > 0 && (
+              <div class="card col-6">
+                <div class="card-title">iOS / iPadOS Versions</div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  {data.osVersions.ios.slice(0, 10).map((v) => (
+                    <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
+                      <span class="stat-label" style="min-width: 120px; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap;">{v.version}</span>
+                      <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
+                        <div style={`width: ${v.percentage}%; height: 100%; background: #a3aaae; border-radius: 4px;`}></div>
+                      </div>
+                      <span class="stat-value" style="min-width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
+                      <span class="stat-label" style="min-width: 36px; text-align: right;">{v.percentage}%</span>
                     </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
             )}
 
@@ -282,14 +279,14 @@ export const IntuneDashboard: FC<Props> = ({ data, error }) => {
               <div class="card col-6">
                 <div class="card-title">Android Versions</div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                  {data.osVersions.android.slice(0, 5).map((v) => (
+                  {data.osVersions.android.slice(0, 10).map((v) => (
                     <div key={v.version} style="display: flex; align-items: center; gap: 12px;">
-                      <span class="stat-label" style="width: 100px; font-family: var(--font-mono); font-size: 0.8rem;">{v.version}</span>
+                      <span class="stat-label" style="min-width: 120px; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap;">{v.version}</span>
                       <div style="flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden;">
                         <div style={`width: ${v.percentage}%; height: 100%; background: #3ddc84; border-radius: 4px;`}></div>
                       </div>
-                      <span class="stat-value" style="width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
-                      <span class="stat-label" style="width: 36px; text-align: right;">{v.percentage}%</span>
+                      <span class="stat-value" style="min-width: 32px; text-align: right; font-size: 0.85rem;">{v.count}</span>
+                      <span class="stat-label" style="min-width: 36px; text-align: right;">{v.percentage}%</span>
                     </div>
                   ))}
                 </div>
