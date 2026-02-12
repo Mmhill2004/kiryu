@@ -157,6 +157,90 @@ export interface DeviceCompliance {
   unknown: number;
 }
 
+// ─── Intune Types ──────────────────────────────────────────────────────────
+
+export interface IntuneManagedDevice {
+  id: string;
+  deviceName: string;
+  operatingSystem: string;
+  osVersion: string;
+  complianceState: string;
+  lastSyncDateTime: string;
+  isEncrypted: boolean;
+  managementState: string;
+  managementAgent: string;
+  enrolledDateTime: string;
+  model: string;
+  manufacturer: string;
+}
+
+export interface IntuneCompliancePolicy {
+  id: string;
+  displayName: string;
+}
+
+export interface IntuneDeviceOverview {
+  pendingCount: number;
+  notApplicableCount: number;
+  successCount: number;
+  errorCount: number;
+  failedCount: number;
+  conflictCount: number;
+}
+
+export interface IntuneDetectedApp {
+  id: string;
+  displayName: string;
+  version: string;
+  sizeInByte: number;
+  deviceCount: number;
+  publisher: string;
+  platform: string;
+}
+
+export interface IntuneDeviceAnalytics {
+  total: number;
+  byComplianceState: Record<string, number>;
+  byOS: Record<string, number>;
+  byManagementState: Record<string, number>;
+  byManagementAgent: Record<string, number>;
+  stale: number;
+  encrypted: number;
+  recentEnrollments: number;
+}
+
+export interface IntunePolicyAnalytics {
+  total: number;
+  policies: Array<{
+    id: string;
+    name: string;
+    success: number;
+    failed: number;
+    error: number;
+    pending: number;
+    conflict: number;
+    notApplicable: number;
+    passRate: number;
+  }>;
+}
+
+export interface IntuneAppAnalytics {
+  total: number;
+  apps: Array<{
+    name: string;
+    publisher: string;
+    deviceCount: number;
+    platform: string;
+    sizeInByte: number;
+  }>;
+}
+
+export interface IntuneSummary {
+  devices: IntuneDeviceAnalytics;
+  policies: IntunePolicyAnalytics;
+  apps: IntuneAppAnalytics;
+}
+
 // ─── Full Summary ───────────────────────────────────────────────────────────
 
 export interface MicrosoftFullSummary {
@@ -168,6 +252,7 @@ export interface MicrosoftFullSummary {
   identity: IdentityRiskSummary;
   incidents: IncidentAnalytics;
   machines: MachineAnalytics;
+  intune: IntuneSummary | null;
   errors: string[];
   fetchedAt: string;
 }
@@ -237,6 +322,15 @@ const EMPTY_MACHINES: MachineAnalytics = {
 const EMPTY_ASSESSMENTS: AssessmentAnalytics = {
   total: 0, healthy: 0, unhealthy: 0, notApplicable: 0, passRate: 0,
   bySeverity: { high: 0, medium: 0, low: 0 },
+};
+
+const EMPTY_INTUNE: IntuneSummary = {
+  devices: {
+    total: 0, byComplianceState: {}, byOS: {}, byManagementState: {},
+    byManagementAgent: {}, stale: 0, encrypted: 0, recentEnrollments: 0,
+  },
+  policies: { total: 0, policies: [] },
+  apps: { total: 0, apps: [] },
 };
 
 // ─── Client ─────────────────────────────────────────────────────────────────
@@ -678,6 +772,114 @@ export class MicrosoftClient {
     };
   }
 
+  // ─── Phase 3: Intune methods ──────────────────────────────────────────────
+
+  async getIntuneDeviceAnalytics(): Promise<IntuneDeviceAnalytics> {
+    const allDevices: IntuneManagedDevice[] = [];
+    const maxPages = 10;
+    let endpoint: string | undefined = '/deviceManagement/managedDevices?$select=id,deviceName,operatingSystem,osVersion,complianceState,lastSyncDateTime,isEncrypted,managementState,managementAgent,enrolledDateTime,model,manufacturer&$top=1000';
+
+    for (let page = 0; page < maxPages; page++) {
+      if (!endpoint) break;
+      const resp: { value: IntuneManagedDevice[]; '@odata.nextLink'?: string } = await this.graphRequest(endpoint);
+      allDevices.push(...(resp.value || []));
+      const rawNext = resp['@odata.nextLink'];
+      endpoint = rawNext ? rawNext.replace(this.graphUrl, '') : undefined;
+    }
+
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    let stale = 0;
+    let encrypted = 0;
+    let recentEnrollments = 0;
+
+    for (const d of allDevices) {
+      if (d.lastSyncDateTime && new Date(d.lastSyncDateTime).getTime() < sevenDaysAgo) stale++;
+      if (d.isEncrypted) encrypted++;
+      if (d.enrolledDateTime && new Date(d.enrolledDateTime).getTime() > thirtyDaysAgo) recentEnrollments++;
+    }
+
+    return {
+      total: allDevices.length,
+      byComplianceState: countBy(allDevices, d => d.complianceState || 'unknown'),
+      byOS: countBy(allDevices, d => d.operatingSystem || 'unknown'),
+      byManagementState: countBy(allDevices, d => d.managementState || 'unknown'),
+      byManagementAgent: countBy(allDevices, d => d.managementAgent || 'unknown'),
+      stale,
+      encrypted,
+      recentEnrollments,
+    };
+  }
+
+  async getIntunePolicyAnalytics(): Promise<IntunePolicyAnalytics> {
+    const policiesResp = await this.graphRequest<{ value: IntuneCompliancePolicy[] }>(
+      '/deviceManagement/deviceCompliancePolicies?$top=50'
+    );
+    const policies = policiesResp.value || [];
+    const maxPolicies = 20;
+    const toFetch = policies.slice(0, maxPolicies);
+
+    const overviewResults = await Promise.allSettled(
+      toFetch.map(p =>
+        this.graphRequest<IntuneDeviceOverview>(
+          `/deviceManagement/deviceCompliancePolicies/${p.id}/deviceStatusOverview`
+        )
+      )
+    );
+
+    const policyAnalytics = toFetch.map((p, i) => {
+      const result = overviewResults[i];
+      if (!result || result.status !== 'fulfilled') {
+        return { id: p.id, name: p.displayName, success: 0, failed: 0, error: 0, pending: 0, conflict: 0, notApplicable: 0, passRate: 0 };
+      }
+      const ov = result.value;
+      const total = ov.successCount + ov.failedCount + ov.errorCount;
+      const passRate = total > 0 ? Math.round((ov.successCount / total) * 100) : 0;
+      return {
+        id: p.id,
+        name: p.displayName,
+        success: ov.successCount,
+        failed: ov.failedCount,
+        error: ov.errorCount,
+        pending: ov.pendingCount,
+        conflict: ov.conflictCount,
+        notApplicable: ov.notApplicableCount,
+        passRate,
+      };
+    });
+
+    return { total: policies.length, policies: policyAnalytics };
+  }
+
+  async getIntuneDetectedApps(): Promise<IntuneAppAnalytics> {
+    const response = await this.graphRequest<{ value: IntuneDetectedApp[]; '@odata.count'?: number }>(
+      '/deviceManagement/detectedApps?$top=50&$orderby=deviceCount desc'
+    );
+    const apps = (response.value || []).slice(0, 30).map(a => ({
+      name: a.displayName,
+      publisher: a.publisher || 'Unknown',
+      deviceCount: a.deviceCount,
+      platform: a.platform || 'unknown',
+      sizeInByte: a.sizeInByte || 0,
+    }));
+
+    return { total: response.value?.length ?? 0, apps };
+  }
+
+  async getIntuneSummary(): Promise<IntuneSummary> {
+    const [devicesResult, policiesResult, appsResult] = await Promise.allSettled([
+      this.getIntuneDeviceAnalytics(),
+      this.getIntunePolicyAnalytics(),
+      this.getIntuneDetectedApps(),
+    ]);
+
+    return {
+      devices: devicesResult.status === 'fulfilled' ? devicesResult.value : EMPTY_INTUNE.devices,
+      policies: policiesResult.status === 'fulfilled' ? policiesResult.value : EMPTY_INTUNE.policies,
+      apps: appsResult.status === 'fulfilled' ? appsResult.value : EMPTY_INTUNE.apps,
+    };
+  }
+
   // ─── Full Summary ─────────────────────────────────────────────────────────
 
   async getFullSummary(): Promise<MicrosoftFullSummary> {
@@ -686,6 +888,7 @@ export class MicrosoftClient {
     const [
       alertsResult, scoreResult, defenderResult, assessResult,
       complianceResult, identityResult, incidentResult, machineResult,
+      intuneResult,
     ] = await Promise.allSettled([
       this.getAlertAnalytics(),
       this.getSecureScore(),
@@ -695,6 +898,7 @@ export class MicrosoftClient {
       this.getIdentityRisk(),
       this.getIncidentAnalytics(),
       this.getMachineAnalytics(),
+      this.getIntuneSummary(),
     ]);
 
     const extract = <T>(result: PromiseSettledResult<T>, fallback: T, label: string): T => {
@@ -712,6 +916,7 @@ export class MicrosoftClient {
       identity: extract(identityResult, EMPTY_IDENTITY, 'Identity Risk'),
       incidents: extract(incidentResult, EMPTY_INCIDENTS, 'Incidents'),
       machines: extract(machineResult, EMPTY_MACHINES, 'Machines'),
+      intune: extract(intuneResult, EMPTY_INTUNE, 'Intune'),
       errors,
       fetchedAt: new Date().toISOString(),
     };

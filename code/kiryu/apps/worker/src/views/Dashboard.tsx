@@ -9,7 +9,7 @@ import type { TicketMetrics } from '../integrations/salesforce/client';
 import type { MicrosoftFullSummary } from '../integrations/microsoft/client';
 import type { ZscalerFullSummary } from '../integrations/zscaler/client';
 import type { MerakiSummary } from '../integrations/meraki/client';
-import type { CrowdStrikeTrends, SalesforceTrends, ZscalerTrends, MerakiTrends } from '../services/trends';
+import type { CrowdStrikeTrends, SalesforceTrends, ZscalerTrends, MerakiTrends, MicrosoftTrends } from '../services/trends';
 
 interface DashboardData {
   crowdstrike: {
@@ -44,6 +44,7 @@ interface DashboardData {
   sfTrends: SalesforceTrends | null;
   zsTrends: ZscalerTrends | null;
   mkTrends: MerakiTrends | null;
+  msTrends: MicrosoftTrends | null;
 }
 
 interface Props {
@@ -166,6 +167,12 @@ function calculateHealthIndicators(
         scores.push(compPct);
         metrics.push({ name: 'Device Compliance', value: `${compPct}%`, source: 'MS' });
       }
+      if (microsoft.intune && microsoft.intune.devices.total > 0) {
+        const intuneCompliant = microsoft.intune.devices.byComplianceState['compliant'] ?? 0;
+        const intunePct = Math.round((intuneCompliant / microsoft.intune.devices.total) * 100);
+        scores.push(intunePct);
+        metrics.push({ name: 'Intune Compliance', value: `${intunePct}%`, source: 'MS' });
+      }
     }
     const score = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
     indicators.push({ score, label: 'Compliance Posture', metrics });
@@ -286,7 +293,7 @@ function calculateCompositeScore(
 }
 
 export const Dashboard: FC<Props> = ({ data }) => {
-  const { crowdstrike, salesforce, microsoft, zscaler, meraki, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends, zsTrends, mkTrends } = data;
+  const { crowdstrike, salesforce, microsoft, zscaler, meraki, platforms, period, lastUpdated, dataSource, cachedAt, csTrends, sfTrends, zsTrends, mkTrends, msTrends } = data;
 
   const securityScore = calculateCompositeScore(crowdstrike, microsoft);
 
@@ -345,6 +352,15 @@ export const Dashboard: FC<Props> = ({ data }) => {
       const compPct = Math.round((microsoft.compliance.compliant / totalDev) * 100);
       if (compPct < 90) {
         actionItems.push({ text: `Device compliance at ${compPct}% (target: 90%)`, severity: compPct < 75 ? 'critical' : 'medium' });
+      }
+    }
+    if (microsoft.intune) {
+      if (microsoft.intune.devices.stale > 10) {
+        actionItems.push({ text: `${microsoft.intune.devices.stale} Intune devices stale (>7d no sync)`, severity: 'medium' });
+      }
+      const intuneNonCompliant = microsoft.intune.devices.byComplianceState['noncompliant'] ?? 0;
+      if (microsoft.intune.devices.total > 0 && intuneNonCompliant / microsoft.intune.devices.total > 0.2) {
+        actionItems.push({ text: `${Math.round((intuneNonCompliant / microsoft.intune.devices.total) * 100)}% Intune devices non-compliant`, severity: 'high' });
       }
     }
   }
@@ -471,6 +487,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
             <button class="tab-btn" data-tab="zdx" role="tab" aria-selected="false" aria-controls="tab-zdx">ZDX</button>
             <button class="tab-btn" data-tab="zins" role="tab" aria-selected="false" aria-controls="tab-zins">ZINS</button>
             <button class="tab-btn" data-tab="meraki" role="tab" aria-selected="false" aria-controls="tab-meraki">Meraki</button>
+            <button class="tab-btn" data-tab="intune" role="tab" aria-selected="false" aria-controls="tab-intune">Intune</button>
           </div>
 
           {/* ═══ EXECUTIVE TAB ═══ */}
@@ -941,14 +958,18 @@ export const Dashboard: FC<Props> = ({ data }) => {
                 <div class="col-12">
                   <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
                     <MetricCard label="Entra Alerts" value={microsoft.alertAnalytics.active} source="MS" compact
-                      severity={microsoft.alertAnalytics.active > 0 ? 'high' : undefined} />
+                      severity={microsoft.alertAnalytics.active > 0 ? 'high' : undefined}
+                      trend={msTrends?.alertsActive ? { ...msTrends.alertsActive, invertColor: true } : undefined} />
                     <MetricCard label="Defender Alerts" value={microsoft.defenderAnalytics.active} compact
                       severity={microsoft.defenderAnalytics.active > 0 ? 'high' : undefined} />
                     <MetricCard label="Risky Users" value={microsoft.identity.riskyUsers.unresolvedCount} compact
-                      severity={microsoft.identity.riskyUsers.unresolvedCount > 0 ? 'critical' : undefined} />
+                      severity={microsoft.identity.riskyUsers.unresolvedCount > 0 ? 'critical' : undefined}
+                      trend={msTrends?.riskyUsersUnresolved ? { ...msTrends.riskyUsersUnresolved, invertColor: true } : undefined} />
                     <MetricCard label="Open Incidents" value={microsoft.incidents.open} compact
-                      severity={microsoft.incidents.open > 0 ? 'high' : undefined} />
-                    <MetricCard label="Secure Score" value={microsoft.secureScore ? `${((microsoft.secureScore.currentScore / Math.max(1, microsoft.secureScore.maxScore)) * 100).toFixed(0)}%` : 'N/A'} compact />
+                      severity={microsoft.incidents.open > 0 ? 'high' : undefined}
+                      trend={msTrends?.incidentsOpen ? { ...msTrends.incidentsOpen, invertColor: true } : undefined} />
+                    <MetricCard label="Secure Score" value={microsoft.secureScore ? `${((microsoft.secureScore.currentScore / Math.max(1, microsoft.secureScore.maxScore)) * 100).toFixed(0)}%` : 'N/A'} compact
+                      trend={msTrends?.secureScoreCurrent ? msTrends.secureScoreCurrent : undefined} />
                     <MetricCard label="Machines" value={microsoft.machines.total} compact />
                   </div>
                 </div>
@@ -1978,6 +1999,154 @@ export const Dashboard: FC<Props> = ({ data }) => {
             })() : (
               <div class="col-12">
                 <p class="no-data">Meraki not configured</p>
+              </div>
+            )}
+          </div>
+
+          {/* ═══ INTUNE TAB ═══ */}
+          <div id="tab-intune" class="tab-content" role="tabpanel" aria-label="Microsoft Intune device management">
+            {microsoft?.intune ? (() => {
+              const intune = microsoft.intune;
+              const devTotal = intune.devices.total;
+              const devCompliant = intune.devices.byComplianceState['compliant'] ?? 0;
+              const devNonCompliant = intune.devices.byComplianceState['noncompliant'] ?? 0;
+              const compliantPct = devTotal > 0 ? Math.round((devCompliant / devTotal) * 100) : 0;
+              const encryptedPct = devTotal > 0 ? Math.round((intune.devices.encrypted / devTotal) * 100) : 0;
+
+              const osEntries = Object.entries(intune.devices.byOS).sort((a, b) => b[1] - a[1]);
+              const osColors: Record<string, string> = {
+                Windows: 'var(--info)', iOS: 'var(--healthy)', macOS: '#8b5cf6',
+                Android: 'var(--medium)', Linux: 'var(--low)',
+              };
+
+              const complianceEntries = Object.entries(intune.devices.byComplianceState).sort((a, b) => b[1] - a[1]);
+              const complianceColors: Record<string, string> = {
+                compliant: 'var(--healthy)', noncompliant: 'var(--critical)',
+                unknown: 'var(--text-muted)', configManager: 'var(--info)',
+                inGracePeriod: 'var(--medium)', conflict: 'var(--low)',
+              };
+
+              return (
+                <>
+                  {/* Row 1: KPI cards */}
+                  <div class="col-12">
+                    <div class="metric-grid" style="grid-template-columns: repeat(6, 1fr);">
+                      <MetricCard label="Managed Devices" value={devTotal} source="MS" compact
+                        trend={msTrends?.intuneDevicesTotal ? msTrends.intuneDevicesTotal : undefined} />
+                      <MetricCard label="Compliant" value={`${compliantPct}%`} compact
+                        trend={msTrends?.intuneCompliant ? msTrends.intuneCompliant : undefined} />
+                      <MetricCard label="Non-Compliant" value={devNonCompliant} compact
+                        severity={devNonCompliant > 0 ? 'high' : undefined}
+                        trend={msTrends?.intuneNonCompliant ? { ...msTrends.intuneNonCompliant, invertColor: true } : undefined} />
+                      <MetricCard label="Stale (7d+)" value={intune.devices.stale} compact
+                        severity={intune.devices.stale > 10 ? 'high' : intune.devices.stale > 0 ? 'medium' : undefined}
+                        trend={msTrends?.intuneStale ? { ...msTrends.intuneStale, invertColor: true } : undefined} />
+                      <MetricCard label="Detected Apps" value={intune.apps.total} compact />
+                      <MetricCard label="Policies" value={intune.policies.total} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 2: OS Breakdown, Compliance State, Device Health */}
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Devices by OS</div>
+                    {osEntries.length > 0 ? (
+                      <DonutChart
+                        segments={osEntries.map(([os, count]) => ({
+                          label: os,
+                          value: count,
+                          color: osColors[os] ?? 'var(--text-muted)',
+                        }))}
+                        centerLabel="Devices"
+                      />
+                    ) : (
+                      <p class="no-data">No OS data</p>
+                    )}
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Compliance State</div>
+                    {complianceEntries.length > 0 ? (
+                      <DonutChart
+                        segments={complianceEntries.map(([state, count]) => ({
+                          label: state.charAt(0).toUpperCase() + state.slice(1),
+                          value: count,
+                          color: complianceColors[state] ?? 'var(--text-muted)',
+                        }))}
+                        centerLabel="Devices"
+                      />
+                    ) : (
+                      <p class="no-data">No compliance data</p>
+                    )}
+                  </div>
+
+                  <div class="card card-compact col-4">
+                    <div class="card-title">Device Health</div>
+                    <div class="gauge-row">
+                      <GaugeChart value={compliantPct} label="Compliant" size="sm" />
+                      <GaugeChart value={encryptedPct} label="Encrypted" size="sm" />
+                    </div>
+                    <div class="mini-metric-grid" style="margin-top: var(--sp-2);">
+                      <MetricCard label="Encrypted" value={intune.devices.encrypted} compact
+                        trend={msTrends?.intuneEncrypted ? msTrends.intuneEncrypted : undefined} />
+                      <MetricCard label="New (30d)" value={intune.devices.recentEnrollments} compact />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Detected Apps table, Compliance Policies table */}
+                  <div class="card card-compact col-6">
+                    <div class="card-title">Top Detected Apps ({intune.apps.total})</div>
+                    <table class="compact-table">
+                      <thead>
+                        <tr><th>Application</th><th>Publisher</th><th>Devices</th></tr>
+                      </thead>
+                      <tbody>
+                        {intune.apps.apps.slice(0, 10).map((app) => (
+                          <tr key={app.name}>
+                            <td style="font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{app.name}</td>
+                            <td style="font-size: 0.6rem; color: var(--text-muted);">{app.publisher}</td>
+                            <td>{app.deviceCount}</td>
+                          </tr>
+                        ))}
+                        {intune.apps.apps.length === 0 && (
+                          <tr><td colSpan={3}><p class="no-data">No detected apps</p></td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="card card-compact col-6">
+                    <div class="card-title">Compliance Policies ({intune.policies.total})</div>
+                    <table class="compact-table">
+                      <thead>
+                        <tr><th>Policy</th><th>Pass Rate</th><th>Success</th><th>Failed</th></tr>
+                      </thead>
+                      <tbody>
+                        {intune.policies.policies.slice(0, 10).map((pol) => (
+                          <tr key={pol.id}>
+                            <td style="font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{pol.name}</td>
+                            <td>
+                              <div style="display: flex; align-items: center; gap: 4px;">
+                                <div class="hbar-track" style="width: 50px;">
+                                  <div class={`hbar-fill ${pol.passRate >= 90 ? 'hbar-good' : pol.passRate >= 70 ? 'hbar-warn' : 'hbar-bad'}`} style={`width: ${pol.passRate}%`} />
+                                </div>
+                                <span style="font-size: 0.6rem;">{pol.passRate}%</span>
+                              </div>
+                            </td>
+                            <td>{pol.success}</td>
+                            <td>{pol.failed > 0 ? <span class="badge badge-critical">{pol.failed}</span> : '0'}</td>
+                          </tr>
+                        ))}
+                        {intune.policies.policies.length === 0 && (
+                          <tr><td colSpan={4}><p class="no-data">No compliance policies</p></td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              );
+            })() : (
+              <div class="col-12">
+                <p class="no-data">Intune not configured or no data available</p>
               </div>
             )}
           </div>

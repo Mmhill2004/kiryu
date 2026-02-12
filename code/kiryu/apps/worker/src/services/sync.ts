@@ -512,6 +512,74 @@ export class SyncService {
       ).run();
     }
 
+    // Store daily Microsoft metrics snapshot (all modules + Intune)
+    const today = new Date().toISOString().split('T')[0];
+    const tenantId = this.env.AZURE_TENANT_ID || '';
+    const intune = summary.intune;
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO microsoft_metrics_daily (
+          date, tenant_id,
+          alerts_total, alerts_active, alerts_high, alerts_medium, alerts_low,
+          defender_alerts_total, defender_alerts_active,
+          secure_score_current, secure_score_max,
+          risky_users_total, risky_users_unresolved, risky_users_high,
+          incidents_total, incidents_open,
+          machines_total, machines_onboarded, machines_stale, machines_high_risk,
+          assessments_total, assessments_pass_rate,
+          compliance_compliant, compliance_non_compliant, compliance_unknown,
+          intune_devices_total, intune_compliant, intune_non_compliant,
+          intune_stale, intune_encrypted, intune_recent_enrollments, intune_by_os,
+          intune_policies_total, intune_top_policies,
+          intune_detected_apps_total, intune_top_apps,
+          intune_by_mgmt_state,
+          metadata, created_at
+        ) VALUES (
+          ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?,
+          ?, ?,
+          ?, ?, ?,
+          ?, ?,
+          ?, ?, ?, ?,
+          ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?,
+          ?, ?,
+          ?,
+          ?, datetime('now')
+        )
+      `).bind(
+        today, tenantId,
+        summary.alertAnalytics.total, summary.alertAnalytics.active,
+        summary.alertAnalytics.bySeverity.high, summary.alertAnalytics.bySeverity.medium, summary.alertAnalytics.bySeverity.low,
+        summary.defenderAnalytics.total, summary.defenderAnalytics.active,
+        summary.secureScore?.currentScore ?? 0, summary.secureScore?.maxScore ?? 0,
+        summary.identity.riskyUsers.total, summary.identity.riskyUsers.unresolvedCount, summary.identity.riskyUsers.byRiskLevel.high,
+        summary.incidents.total, summary.incidents.open,
+        summary.machines.total, summary.machines.onboarded, summary.machines.stale, summary.machines.byRiskScore.high,
+        summary.assessments.total, summary.assessments.passRate,
+        summary.compliance.compliant, summary.compliance.nonCompliant, summary.compliance.unknown,
+        intune?.devices.total ?? 0,
+        intune?.devices.byComplianceState['compliant'] ?? 0,
+        intune?.devices.byComplianceState['noncompliant'] ?? 0,
+        intune?.devices.stale ?? 0, intune?.devices.encrypted ?? 0,
+        intune?.devices.recentEnrollments ?? 0,
+        JSON.stringify(intune?.devices.byOS ?? {}),
+        intune?.policies.total ?? 0,
+        JSON.stringify((intune?.policies.policies ?? []).slice(0, 10).map(p => ({ name: p.name, passRate: p.passRate, success: p.success, failed: p.failed }))),
+        intune?.apps.total ?? 0,
+        JSON.stringify((intune?.apps.apps ?? []).slice(0, 10).map(a => ({ name: a.name, deviceCount: a.deviceCount, publisher: a.publisher }))),
+        JSON.stringify(intune?.devices.byManagementState ?? {}),
+        JSON.stringify({ errors: summary.errors })
+      ).run();
+      recordsSynced++;
+    } catch (error) {
+      console.error('Error storing microsoft_metrics_daily:', error);
+    }
+
     await this.updatePlatformStatus('microsoft', 'healthy', {
       security_alerts: summary.alertAnalytics.total,
       defender_alerts: summary.defenderAnalytics.total,
@@ -522,6 +590,8 @@ export class SyncService {
       risky_users: summary.identity.riskyUsers.unresolvedCount,
       incidents: summary.incidents.open,
       machines: summary.machines.total,
+      intune_devices: intune?.devices.total ?? 0,
+      intune_policies: intune?.policies.total ?? 0,
       errors: summary.errors,
     });
 
@@ -728,6 +798,7 @@ export class SyncService {
       ['ticket_metrics_daily', 'date'],
       ['zscaler_metrics_daily', 'date'],
       ['meraki_metrics_daily', 'date'],
+      ['microsoft_metrics_daily', 'date'],
       ['daily_summaries', 'date'],
       ['security_events', 'created_at'],
       ['sync_logs', 'started_at'],
@@ -738,6 +809,7 @@ export class SyncService {
       { name: 'ticket_metrics_daily', dateCol: 'date' },
       { name: 'zscaler_metrics_daily', dateCol: 'date' },
       { name: 'meraki_metrics_daily', dateCol: 'date' },
+      { name: 'microsoft_metrics_daily', dateCol: 'date' },
       { name: 'daily_summaries', dateCol: 'date' },
       { name: 'security_events', dateCol: 'created_at' },
       { name: 'sync_logs', dateCol: 'started_at' },

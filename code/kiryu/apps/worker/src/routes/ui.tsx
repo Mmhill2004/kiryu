@@ -7,7 +7,7 @@ import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/micr
 import { ZscalerClient, type ZscalerFullSummary } from '../integrations/zscaler/client';
 import { MerakiClient, type MerakiSummary } from '../integrations/meraki/client';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from '../services/cache';
-import { TrendService, type CrowdStrikeTrends, type SalesforceTrends, type ZscalerTrends, type MerakiTrends } from '../services/trends';
+import { TrendService, type CrowdStrikeTrends, type SalesforceTrends, type ZscalerTrends, type MerakiTrends, type MicrosoftTrends } from '../services/trends';
 
 export const uiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +37,7 @@ uiRoutes.get('/', async (c) => {
   let sfTrends: SalesforceTrends | null = null;
   let zsTrends: ZscalerTrends | null = null;
   let mkTrends: MerakiTrends | null = null;
+  let msTrends: MicrosoftTrends | null = null;
   let platforms: Array<{
     platform: string;
     status: 'healthy' | 'error' | 'not_configured' | 'unknown';
@@ -266,6 +267,11 @@ uiRoutes.get('/', async (c) => {
       .then(data => { mkTrends = data; })
       .catch(err => console.error('MK trend fetch error:', err))
   );
+  fetchPromises.push(
+    trendService.getMicrosoftTrends(daysBack)
+      .then(data => { msTrends = data; })
+      .catch(err => console.error('MS trend fetch error:', err))
+  );
 
   // Wait for all fetches to complete (individual timeouts above prevent indefinite hang)
   await Promise.all(fetchPromises);
@@ -292,6 +298,7 @@ uiRoutes.get('/', async (c) => {
         sfTrends,
         zsTrends,
         mkTrends,
+        msTrends,
       }}
     />
   );

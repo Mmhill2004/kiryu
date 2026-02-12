@@ -224,6 +224,42 @@ const TOOLS = [
     },
   },
   {
+    name: "get_intune_summary",
+    description:
+      "Get Microsoft Intune full summary including managed device analytics, compliance policy pass rates, and top detected applications.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_intune_devices",
+    description:
+      "Get Microsoft Intune managed device analytics: total devices, compliance state breakdown, OS distribution, stale/encrypted counts, and recent enrollments.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_intune_policies",
+    description:
+      "Get Microsoft Intune compliance policy analytics: policy list with pass rates, success/failed/error counts per policy.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_intune_detected_apps",
+    description:
+      "Get Microsoft Intune detected applications: top apps by device count, with publisher and platform info.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
     name: "get_ngsiem_summary",
     description:
       "Get CrowdStrike NGSIEM/LogScale metrics including repository counts, data ingest volumes, saved searches, and recent event activity. Use this to understand log management and SIEM capabilities.",
@@ -718,6 +754,22 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_microsoft_recommendations": {
       return apiRequest("/api/integrations/microsoft/recommendations");
+    }
+
+    case "get_intune_summary": {
+      return apiRequest("/api/integrations/microsoft/intune/summary");
+    }
+
+    case "get_intune_devices": {
+      return apiRequest("/api/integrations/microsoft/intune/devices");
+    }
+
+    case "get_intune_policies": {
+      return apiRequest("/api/integrations/microsoft/intune/policies");
+    }
+
+    case "get_intune_detected_apps": {
+      return apiRequest("/api/integrations/microsoft/intune/apps");
     }
 
     case "get_ngsiem_summary": {

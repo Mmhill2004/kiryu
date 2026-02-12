@@ -49,6 +49,18 @@ export interface MerakiTrends {
   uplinksActive: TrendData;
 }
 
+export interface MicrosoftTrends {
+  alertsActive: TrendData;
+  secureScoreCurrent: TrendData;
+  riskyUsersUnresolved: TrendData;
+  incidentsOpen: TrendData;
+  intuneDevicesTotal: TrendData;
+  intuneCompliant: TrendData;
+  intuneNonCompliant: TrendData;
+  intuneStale: TrendData;
+  intuneEncrypted: TrendData;
+}
+
 export class TrendService {
   constructor(private env: Env) {}
 
@@ -201,6 +213,47 @@ export class TrendService {
       };
     } catch (error) {
       console.error('Error fetching Meraki trends:', error);
+      return null;
+    }
+  }
+
+  async getMicrosoftTrends(periodDays: number): Promise<MicrosoftTrends | null> {
+    try {
+      const totalDays = periodDays * 2;
+      const rows = await this.env.DB.prepare(`
+        SELECT date, alerts_active, secure_score_current,
+               risky_users_unresolved, incidents_open,
+               intune_devices_total, intune_compliant, intune_non_compliant,
+               intune_stale, intune_encrypted
+        FROM microsoft_metrics_daily
+        WHERE date >= date('now', '-' || ? || ' days')
+        ORDER BY date ASC
+      `).bind(totalDays).all<Record<string, unknown>>();
+
+      if (!rows.results || rows.results.length === 0) return null;
+
+      const midpoint = new Date();
+      midpoint.setDate(midpoint.getDate() - periodDays);
+      const midpointStr = midpoint.toISOString().split('T')[0] ?? '';
+
+      const previous = rows.results.filter((r) => (r.date as string) < midpointStr);
+      const current = rows.results.filter((r) => (r.date as string) >= midpointStr);
+
+      if (current.length === 0) return null;
+
+      return {
+        alertsActive: this.buildTrend(current, previous, 'alerts_active'),
+        secureScoreCurrent: this.buildTrend(current, previous, 'secure_score_current'),
+        riskyUsersUnresolved: this.buildTrend(current, previous, 'risky_users_unresolved'),
+        incidentsOpen: this.buildTrend(current, previous, 'incidents_open'),
+        intuneDevicesTotal: this.buildTrend(current, previous, 'intune_devices_total'),
+        intuneCompliant: this.buildTrend(current, previous, 'intune_compliant'),
+        intuneNonCompliant: this.buildTrend(current, previous, 'intune_non_compliant'),
+        intuneStale: this.buildTrend(current, previous, 'intune_stale'),
+        intuneEncrypted: this.buildTrend(current, previous, 'intune_encrypted'),
+      };
+    } catch (error) {
+      console.error('Error fetching Microsoft trends:', error);
       return null;
     }
   }

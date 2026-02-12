@@ -119,14 +119,92 @@ microsoftRoutes.get('/recommendations', async (c) => {
  */
 microsoftRoutes.get('/compliance', async (c) => {
   const client = new MicrosoftClient(c.env);
-  
+
   try {
     const compliance = await client.getDeviceCompliance();
     return c.json(compliance);
   } catch (error) {
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch compliance',
       message: 'An internal error occurred'
     }, 500);
+  }
+});
+
+// ─── Intune Routes ──────────────────────────────────────────────────────────
+
+/**
+ * Get Intune full summary (devices, policies, apps)
+ */
+microsoftRoutes.get('/intune/summary', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'Microsoft not configured' }, 503);
+  }
+
+  try {
+    const summary = await client.getIntuneSummary();
+    return c.json(summary);
+  } catch (error) {
+    console.error('Intune summary error:', error);
+    return c.json({ error: 'Failed to fetch Intune summary', message: 'An internal error occurred' }, 500);
+  }
+});
+
+/**
+ * Get Intune managed device analytics
+ */
+microsoftRoutes.get('/intune/devices', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'Microsoft not configured' }, 503);
+  }
+
+  try {
+    const devices = await client.getIntuneDeviceAnalytics();
+    return c.json(devices);
+  } catch (error) {
+    console.error('Intune devices error:', error);
+    return c.json({ error: 'Failed to fetch Intune devices', message: 'An internal error occurred' }, 500);
+  }
+});
+
+/**
+ * Get Intune compliance policy analytics
+ */
+microsoftRoutes.get('/intune/policies', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'Microsoft not configured' }, 503);
+  }
+
+  try {
+    const policies = await client.getIntunePolicyAnalytics();
+    return c.json(policies);
+  } catch (error) {
+    console.error('Intune policies error:', error);
+    return c.json({ error: 'Failed to fetch Intune policies', message: 'An internal error occurred' }, 500);
+  }
+});
+
+/**
+ * Get Intune detected apps
+ */
+microsoftRoutes.get('/intune/apps', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.json({ error: 'Microsoft not configured' }, 503);
+  }
+
+  try {
+    const apps = await client.getIntuneDetectedApps();
+    return c.json(apps);
+  } catch (error) {
+    console.error('Intune apps error:', error);
+    return c.json({ error: 'Failed to fetch Intune detected apps', message: 'An internal error occurred' }, 500);
   }
 });
