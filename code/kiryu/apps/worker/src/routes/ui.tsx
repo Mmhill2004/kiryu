@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
+import { IntuneDashboard } from '../views/IntuneDashboard';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
@@ -302,4 +303,38 @@ uiRoutes.get('/', async (c) => {
       }}
     />
   );
+});
+
+/**
+ * Dedicated Intune device management page
+ */
+uiRoutes.get('/intune', async (c) => {
+  const client = new MicrosoftClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.html(<IntuneDashboard data={null} />);
+  }
+
+  const cache = new CacheService(c.env.CACHE);
+  const cacheKey = 'intune:detailed:summary';
+  const forceRefresh = c.req.query('refresh') === 'true';
+
+  // Try cache first
+  if (!forceRefresh) {
+    const cached = await cache.get<import('../integrations/microsoft/client').IntuneDetailedSummary>(cacheKey);
+    if (cached) {
+      return c.html(<IntuneDashboard data={cached.data} />);
+    }
+  }
+
+  try {
+    const summary = await client.getIntuneDetailedSummary();
+    await cache.set(cacheKey, summary, CACHE_TTL.DASHBOARD_DATA);
+    return c.html(<IntuneDashboard data={summary} />);
+  } catch (error) {
+    console.error('Intune page error:', error instanceof Error ? error.message : error);
+    return c.html(
+      <IntuneDashboard data={null} error="Failed to load Intune data. Please try again." />
+    );
+  }
 });

@@ -1003,6 +1003,32 @@ const styles = `
     text-decoration: underline;
   }
 
+  /* ═══ PAGE NAVIGATION (Security / Intune) ═══ */
+  .tab-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+  }
+
+  .tab-link:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+    text-decoration: none;
+  }
+
+  .tab-active {
+    color: var(--accent) !important;
+    background: var(--accent-glow);
+    border-color: rgba(6, 182, 212, 0.2);
+  }
+
   /* ═══ TABLE OVERFLOW ═══ */
   .card table {
     display: block;

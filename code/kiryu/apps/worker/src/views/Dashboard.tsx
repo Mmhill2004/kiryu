@@ -382,6 +382,10 @@ export const Dashboard: FC<Props> = ({ data }) => {
             </div>
           </div>
           <div class="header-right">
+            <nav style="display: flex; gap: 4px; margin-right: 8px;">
+              <a href="/" class="tab-link tab-active">Security</a>
+              <a href="/intune" class="tab-link">Intune</a>
+            </nav>
             <p class="cache-indicator">
               {dataSource === 'cache' && cachedAt
                 ? `Cached ${new Date(cachedAt).toLocaleTimeString()}`

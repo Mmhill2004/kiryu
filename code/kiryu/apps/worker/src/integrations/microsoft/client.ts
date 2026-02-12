@@ -166,7 +166,13 @@ export interface IntuneManagedDevice {
   osVersion: string;
   complianceState: string;
   lastSyncDateTime: string;
+  userDisplayName: string;
+  userPrincipalName: string;
+  serialNumber: string;
+  managedDeviceOwnerType: string;
   isEncrypted: boolean;
+  isSupervised: boolean;
+  jailBroken: string;
   managementState: string;
   managementAgent: string;
   enrolledDateTime: string;
@@ -239,6 +245,80 @@ export interface IntuneSummary {
   devices: IntuneDeviceAnalytics;
   policies: IntunePolicyAnalytics;
   apps: IntuneAppAnalytics;
+}
+
+// ─── Intune Detailed Types (for /intune page) ──────────────────────────────
+
+/** Beta device with hardware info (includes lastRebootDateTime) */
+export interface IntuneManagedDeviceBeta extends IntuneManagedDevice {
+  hardwareInformation?: {
+    lastRebootDateTime?: string;
+    totalStorageSpace?: number;
+    freeStorageSpace?: number;
+  };
+}
+
+/** Compliance policy summary from deviceCompliancePolicyDeviceStateSummary */
+export interface IntuneCompliancePolicySummary {
+  compliantDeviceCount: number;
+  nonCompliantDeviceCount: number;
+  errorDeviceCount: number;
+  conflictDeviceCount: number;
+  unknownDeviceCount: number;
+  notApplicableDeviceCount: number;
+}
+
+/** Individual compliance policy with description */
+export interface IntuneCompliancePolicyDetail {
+  id: string;
+  displayName: string;
+  description: string;
+  lastModifiedDateTime: string;
+}
+
+/** OS version grouping for currency analysis */
+export interface OSVersionGroup {
+  version: string;
+  count: number;
+  percentage: number;
+}
+
+/** Full detailed Intune summary for the dedicated /intune page */
+export interface IntuneDetailedSummary {
+  totalDevices: number;
+  devicesByOS: { windows: number; ios: number; macos: number; android: number; other: number };
+  ownership: { corporate: number; personal: number; unknown: number };
+  complianceSummary: IntuneCompliancePolicySummary;
+  complianceRate: number;
+  policies: Array<IntuneCompliancePolicyDetail & {
+    compliant: number;
+    nonCompliant: number;
+    error: number;
+    total: number;
+  }>;
+  osVersions: {
+    windows: OSVersionGroup[];
+    ios: OSVersionGroup[];
+    macos: OSVersionGroup[];
+    android: OSVersionGroup[];
+  };
+  encryption: { encrypted: number; notEncrypted: number; unknown: number; rate: number };
+  supervised: { supervised: number; unsupervised: number; rate: number };
+  jailbroken: {
+    compromised: number;
+    clean: number;
+    unknown: number;
+    devices: IntuneManagedDevice[];
+  };
+  staleDevices: IntuneManagedDevice[];
+  staleCount: number;
+  rebootNeeded: IntuneManagedDeviceBeta[];
+  rebootNeededCount: number;
+  enrolledLast7Days: number;
+  enrolledLast30Days: number;
+  nonCompliantDevices: IntuneManagedDevice[];
+  fetchedAt: string;
+  errors: string[];
 }
 
 // ─── Full Summary ───────────────────────────────────────────────────────────
@@ -337,6 +417,7 @@ const EMPTY_INTUNE: IntuneSummary = {
 
 export class MicrosoftClient {
   private graphUrl = 'https://graph.microsoft.com/v1.0';
+  private betaUrl = 'https://graph.microsoft.com/beta';
   private securityUrl = 'https://api.securitycenter.microsoft.com/api';
   private tokens: Map<string, MicrosoftToken> = new Map();
   private pendingAuth: Map<string, Promise<string>> = new Map();
@@ -504,6 +585,63 @@ export class MicrosoftClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private async betaRequest<T>(endpoint: string): Promise<T> {
+    const token = await this.authenticate();
+    const url = endpoint.startsWith('http') ? endpoint : `${this.betaUrl}${endpoint}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Graph Beta API ${response.status} (${endpoint.split('?')[0]}): ${error.slice(0, 200)}`);
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Graph Beta API timeout (20s): ${endpoint.split('?')[0]}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /** Page through an OData collection, following @odata.nextLink */
+  private async paginateGraph<T>(
+    firstEndpoint: string,
+    requester: (endpoint: string) => Promise<{ value: T[]; '@odata.nextLink'?: string }>,
+    maxPages = 10
+  ): Promise<T[]> {
+    const items: T[] = [];
+    let endpoint: string | undefined = firstEndpoint;
+
+    for (let page = 0; page < maxPages; page++) {
+      if (!endpoint) break;
+      const resp = await requester(endpoint);
+      items.push(...(resp.value || []));
+      const rawNext = resp['@odata.nextLink'];
+      // nextLink is a full URL — strip the base if it matches our graphUrl or betaUrl
+      if (rawNext) {
+        endpoint = rawNext.startsWith('http') ? rawNext : undefined;
+      } else {
+        endpoint = undefined;
+      }
+    }
+
+    return items;
   }
 
   // ─── Phase 1: Enriched existing methods ─────────────────────────────────
@@ -777,7 +915,7 @@ export class MicrosoftClient {
   async getIntuneDeviceAnalytics(): Promise<IntuneDeviceAnalytics> {
     const allDevices: IntuneManagedDevice[] = [];
     const maxPages = 10;
-    let endpoint: string | undefined = '/deviceManagement/managedDevices?$select=id,deviceName,operatingSystem,osVersion,complianceState,lastSyncDateTime,isEncrypted,managementState,managementAgent,enrolledDateTime,model,manufacturer&$top=1000';
+    let endpoint: string | undefined = '/deviceManagement/managedDevices?$select=id,deviceName,operatingSystem,osVersion,complianceState,lastSyncDateTime,userDisplayName,userPrincipalName,serialNumber,managedDeviceOwnerType,isEncrypted,isSupervised,jailBroken,managementState,managementAgent,enrolledDateTime,model,manufacturer&$top=1000';
 
     for (let page = 0; page < maxPages; page++) {
       if (!endpoint) break;
@@ -877,6 +1015,283 @@ export class MicrosoftClient {
       devices: devicesResult.status === 'fulfilled' ? devicesResult.value : EMPTY_INTUNE.devices,
       policies: policiesResult.status === 'fulfilled' ? policiesResult.value : EMPTY_INTUNE.policies,
       apps: appsResult.status === 'fulfilled' ? appsResult.value : EMPTY_INTUNE.apps,
+    };
+  }
+
+  // ─── Phase 4: Detailed Intune methods (for /intune page) ────────────────
+
+  /** Fetch all managed devices via v1.0 API with full field set */
+  async getManagedDevices(): Promise<IntuneManagedDevice[]> {
+    const select = [
+      'id', 'deviceName', 'operatingSystem', 'osVersion',
+      'complianceState', 'lastSyncDateTime', 'userDisplayName',
+      'userPrincipalName', 'serialNumber', 'model', 'manufacturer',
+      'managedDeviceOwnerType', 'enrolledDateTime', 'isEncrypted',
+      'isSupervised', 'jailBroken', 'managementAgent', 'managementState',
+    ].join(',');
+
+    return this.paginateGraph<IntuneManagedDevice>(
+      `/deviceManagement/managedDevices?$select=${select}&$top=999`,
+      (url) => this.graphRequest(url)
+    );
+  }
+
+  /** Fetch all managed devices via beta API (includes hardwareInformation.lastRebootDateTime) */
+  async getManagedDevicesBeta(): Promise<IntuneManagedDeviceBeta[]> {
+    const select = [
+      'id', 'deviceName', 'operatingSystem', 'osVersion',
+      'complianceState', 'lastSyncDateTime', 'userDisplayName',
+      'userPrincipalName', 'serialNumber', 'model', 'manufacturer',
+      'managedDeviceOwnerType', 'enrolledDateTime', 'isEncrypted',
+      'isSupervised', 'jailBroken', 'managementAgent', 'managementState',
+      'hardwareInformation',
+    ].join(',');
+
+    return this.paginateGraph<IntuneManagedDeviceBeta>(
+      `/deviceManagement/managedDevices?$select=${select}&$top=999`,
+      (url) => this.betaRequest(url)
+    );
+  }
+
+  /** Get aggregate compliance counts from deviceCompliancePolicyDeviceStateSummary */
+  async getCompliancePolicySummary(): Promise<IntuneCompliancePolicySummary> {
+    try {
+      return await this.graphRequest<IntuneCompliancePolicySummary>(
+        '/deviceManagement/deviceCompliancePolicyDeviceStateSummary'
+      );
+    } catch (error) {
+      console.warn('Failed to get compliance summary:', error);
+      return {
+        compliantDeviceCount: 0, nonCompliantDeviceCount: 0,
+        errorDeviceCount: 0, conflictDeviceCount: 0,
+        unknownDeviceCount: 0, notApplicableDeviceCount: 0,
+      };
+    }
+  }
+
+  /** Get individual compliance policies with description */
+  async getCompliancePolicies(): Promise<IntuneCompliancePolicyDetail[]> {
+    try {
+      const response = await this.graphRequest<{ value: IntuneCompliancePolicyDetail[] }>(
+        '/deviceManagement/deviceCompliancePolicies?$select=id,displayName,description,lastModifiedDateTime'
+      );
+      return response.value || [];
+    } catch (error) {
+      console.warn('Failed to get compliance policies:', error);
+      return [];
+    }
+  }
+
+  /** Get per-policy device status overview */
+  async getPolicyDeviceStatusSummary(policyId: string): Promise<{
+    compliant: number; nonCompliant: number; error: number;
+    conflict: number; notApplicable: number;
+  }> {
+    try {
+      const response = await this.graphRequest<{
+        compliantDeviceCount: number; nonCompliantDeviceCount: number;
+        errorDeviceCount: number; conflictDeviceCount: number;
+        notApplicableDeviceCount: number;
+      }>(`/deviceManagement/deviceCompliancePolicies/${policyId}/deviceStatusOverview`);
+      return {
+        compliant: response.compliantDeviceCount || 0,
+        nonCompliant: response.nonCompliantDeviceCount || 0,
+        error: response.errorDeviceCount || 0,
+        conflict: response.conflictDeviceCount || 0,
+        notApplicable: response.notApplicableDeviceCount || 0,
+      };
+    } catch (error) {
+      console.warn(`Failed to get status for policy ${policyId}:`, error);
+      return { compliant: 0, nonCompliant: 0, error: 0, conflict: 0, notApplicable: 0 };
+    }
+  }
+
+  /** Group devices by OS version for currency analysis */
+  private groupByVersion(devices: IntuneManagedDeviceBeta[]): OSVersionGroup[] {
+    if (devices.length === 0) return [];
+
+    const counts = new Map<string, number>();
+    for (const d of devices) {
+      const raw = d.osVersion || 'Unknown';
+      const parts = raw.split('.');
+      const normalized = parts.length >= 3 ? parts.slice(0, 3).join('.') : raw;
+      counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .map(([version, count]) => ({
+        version,
+        count,
+        percentage: Math.round((count / devices.length) * 100),
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /** Full detailed Intune summary for the dedicated /intune page */
+  async getIntuneDetailedSummary(): Promise<IntuneDetailedSummary> {
+    const errors: string[] = [];
+    const fetchedAt = new Date().toISOString();
+
+    const [devicesBetaResult, complianceSummaryResult, policiesResult] = await Promise.allSettled([
+      this.getManagedDevicesBeta(),
+      this.getCompliancePolicySummary(),
+      this.getCompliancePolicies(),
+    ]);
+
+    const devicesBeta = devicesBetaResult.status === 'fulfilled'
+      ? devicesBetaResult.value
+      : (errors.push(`Devices: ${devicesBetaResult.reason}`), [] as IntuneManagedDeviceBeta[]);
+
+    const complianceSummary = complianceSummaryResult.status === 'fulfilled'
+      ? complianceSummaryResult.value
+      : (errors.push(`Compliance summary: ${complianceSummaryResult.reason}`), {
+          compliantDeviceCount: 0, nonCompliantDeviceCount: 0,
+          errorDeviceCount: 0, conflictDeviceCount: 0,
+          unknownDeviceCount: 0, notApplicableDeviceCount: 0,
+        } as IntuneCompliancePolicySummary);
+
+    const policies = policiesResult.status === 'fulfilled'
+      ? policiesResult.value
+      : (errors.push(`Policies: ${policiesResult.reason}`), [] as IntuneCompliancePolicyDetail[]);
+
+    // Fetch per-policy status overviews (parallel, max 20)
+    const policyDetails = await Promise.all(
+      policies.slice(0, 20).map(async (policy) => {
+        const status = await this.getPolicyDeviceStatusSummary(policy.id);
+        return {
+          ...policy,
+          compliant: status.compliant,
+          nonCompliant: status.nonCompliant,
+          error: status.error,
+          total: status.compliant + status.nonCompliant + status.error,
+        };
+      })
+    );
+
+    const now = Date.now();
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const fourteenDaysAgo = now - 14 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+
+    // OS breakdown
+    const devicesByOS = { windows: 0, ios: 0, macos: 0, android: 0, other: 0 };
+    for (const d of devicesBeta) {
+      const os = (d.operatingSystem || '').toLowerCase();
+      if (os.includes('windows')) devicesByOS.windows++;
+      else if (os === 'ios' || os === 'ipados') devicesByOS.ios++;
+      else if (os.includes('macos') || os.includes('mac os')) devicesByOS.macos++;
+      else if (os.includes('android')) devicesByOS.android++;
+      else devicesByOS.other++;
+    }
+
+    // Ownership breakdown
+    const ownership = { corporate: 0, personal: 0, unknown: 0 };
+    for (const d of devicesBeta) {
+      const type = (d.managedDeviceOwnerType || '').toLowerCase();
+      if (type === 'company') ownership.corporate++;
+      else if (type === 'personal') ownership.personal++;
+      else ownership.unknown++;
+    }
+
+    // OS version currency analysis
+    const osVersions = {
+      windows: this.groupByVersion(devicesBeta.filter(d => (d.operatingSystem || '').toLowerCase().includes('windows'))),
+      ios: this.groupByVersion(devicesBeta.filter(d => ['ios', 'ipados'].includes((d.operatingSystem || '').toLowerCase()))),
+      macos: this.groupByVersion(devicesBeta.filter(d => (d.operatingSystem || '').toLowerCase().includes('mac'))),
+      android: this.groupByVersion(devicesBeta.filter(d => (d.operatingSystem || '').toLowerCase().includes('android'))),
+    };
+
+    // Encryption status
+    const encrypted = devicesBeta.filter(d => d.isEncrypted === true).length;
+    const notEncrypted = devicesBeta.filter(d => d.isEncrypted === false).length;
+    const encryptionUnknown = devicesBeta.length - encrypted - notEncrypted;
+    const encryptableDevices = encrypted + notEncrypted;
+
+    // Supervised status (iOS)
+    const iosDevices = devicesBeta.filter(d =>
+      ['ios', 'ipados'].includes((d.operatingSystem || '').toLowerCase())
+    );
+    const supervisedCount = iosDevices.filter(d => d.isSupervised === true).length;
+
+    // Jailbreak / Root detection
+    const compromised = devicesBeta.filter(d =>
+      (d.jailBroken || '').toLowerCase() === 'true'
+    );
+    const jailbrokenClean = devicesBeta.filter(d =>
+      (d.jailBroken || '').toLowerCase() === 'false'
+    ).length;
+
+    // Stale devices (30+ days)
+    const staleDevices = devicesBeta
+      .filter(d => d.lastSyncDateTime && new Date(d.lastSyncDateTime).getTime() < thirtyDaysAgo)
+      .sort((a, b) => new Date(a.lastSyncDateTime).getTime() - new Date(b.lastSyncDateTime).getTime());
+
+    // Reboot hygiene (14+ days via beta API)
+    const rebootNeeded = devicesBeta
+      .filter(d => {
+        const rebootTime = d.hardwareInformation?.lastRebootDateTime;
+        if (!rebootTime) return false;
+        return new Date(rebootTime).getTime() < fourteenDaysAgo;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.hardwareInformation?.lastRebootDateTime || 0).getTime();
+        const bTime = new Date(b.hardwareInformation?.lastRebootDateTime || 0).getTime();
+        return aTime - bTime;
+      });
+
+    // Enrollment velocity
+    const enrolledLast7Days = devicesBeta.filter(d =>
+      d.enrolledDateTime && new Date(d.enrolledDateTime).getTime() > sevenDaysAgo
+    ).length;
+    const enrolledLast30Days = devicesBeta.filter(d =>
+      d.enrolledDateTime && new Date(d.enrolledDateTime).getTime() > thirtyDaysAgo
+    ).length;
+
+    // Non-compliant device list
+    const nonCompliantDevices = devicesBeta
+      .filter(d => d.complianceState === 'noncompliant')
+      .sort((a, b) => a.deviceName.localeCompare(b.deviceName));
+
+    // Overall compliance rate
+    const compliantCount = devicesBeta.filter(d => d.complianceState === 'compliant').length;
+    const complianceRate = devicesBeta.length > 0
+      ? Math.round((compliantCount / devicesBeta.length) * 100)
+      : 0;
+
+    return {
+      totalDevices: devicesBeta.length,
+      devicesByOS,
+      ownership,
+      complianceSummary,
+      complianceRate,
+      policies: policyDetails,
+      osVersions,
+      encryption: {
+        encrypted,
+        notEncrypted,
+        unknown: encryptionUnknown,
+        rate: encryptableDevices > 0 ? Math.round((encrypted / encryptableDevices) * 100) : 0,
+      },
+      supervised: {
+        supervised: supervisedCount,
+        unsupervised: iosDevices.length - supervisedCount,
+        rate: iosDevices.length > 0 ? Math.round((supervisedCount / iosDevices.length) * 100) : 0,
+      },
+      jailbroken: {
+        compromised: compromised.length,
+        clean: jailbrokenClean,
+        unknown: devicesBeta.length - compromised.length - jailbrokenClean,
+        devices: compromised,
+      },
+      staleDevices,
+      staleCount: staleDevices.length,
+      rebootNeeded,
+      rebootNeededCount: rebootNeeded.length,
+      enrolledLast7Days,
+      enrolledLast30Days,
+      nonCompliantDevices,
+      fetchedAt,
+      errors,
     };
   }
 

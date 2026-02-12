@@ -4,13 +4,13 @@ This directory contains MCP (Model Context Protocol) servers that allow Claude D
 
 ## Overview
 
-MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 57 tools covering all integrated platforms.
+MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 60 tools covering all integrated platforms.
 
 ## Security Dashboard MCP Server (`security-dashboard/`)
 
 A unified MCP server that connects to your Security Dashboard Worker API.
 
-### Tools (57)
+### Tools (60)
 
 #### Dashboard & Reports (7)
 | Tool | Description |
@@ -39,7 +39,7 @@ A unified MCP server that connects to your Security Dashboard Worker API.
 | `get_crowdstrike_diagnostic` | Test all CrowdStrike API scopes, report availability |
 | `get_historical_trends` | D1 trend data with period comparisons |
 
-#### Microsoft (10)
+#### Microsoft (13)
 | Tool | Description |
 |------|-------------|
 | `get_microsoft_summary` | Full Microsoft security summary (all 11 modules) |
@@ -49,9 +49,12 @@ A unified MCP server that connects to your Security Dashboard Worker API.
 | `get_microsoft_compliance` | Intune device compliance status |
 | `get_microsoft_recommendations` | Cloud Defender security assessments |
 | `get_intune_summary` | Intune full summary (devices, policies, detected apps) |
-| `get_intune_devices` | Managed device analytics: compliance, OS, stale, encrypted |
+| `get_intune_devices` | Managed device inventory with OS/compliance filters |
 | `get_intune_policies` | Compliance policy pass rates and success/failed counts |
 | `get_intune_detected_apps` | Top detected applications by device count |
+| `get_intune_stale_devices` | Devices not synced in 30+ days (configurable) |
+| `get_intune_reboot_needed` | Devices not rebooted in 14+ days (beta API) |
+| `get_intune_compliance_policies` | Per-policy compliance breakdown with pass rates |
 
 #### Zscaler (9)
 | Tool | Description |
@@ -178,6 +181,10 @@ Once configured, you can ask Claude questions like:
 - "What's the compliance policy pass rate?"
 - "Show me the top detected apps across managed devices"
 - "Are there stale Intune devices that haven't synced?"
+- "Which devices need a reboot?"
+- "Show me devices by OS version for currency analysis"
+- "How many corporate vs personal devices are enrolled?"
+- "Are there any jailbroken or rooted devices?"
 
 ## Development
 

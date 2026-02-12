@@ -54,7 +54,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 57 tools
+- **AI Integration**: MCP server with 60 tools
 
 ## Common Commands
 
@@ -94,10 +94,11 @@ kiryu/
 │   ├── views/                # JSX components
 │   │   ├── Layout.tsx        # Base HTML + all CSS
 │   │   ├── Dashboard.tsx     # Main dashboard with trends + cache indicator
+│   │   ├── IntuneDashboard.tsx # Dedicated Intune device management page
 │   │   ├── ReportTemplate.tsx # Self-contained HTML monthly report
 │   │   └── components/       # MetricCard, GaugeChart, DonutChart, SecurityScore, ThreatChart
 │   ├── routes/
-│   │   ├── ui.tsx            # Dashboard HTML route (/) with KV cache
+│   │   ├── ui.tsx            # Dashboard HTML route (/) + Intune page (/intune) with KV cache
 │   │   ├── dashboard.ts      # Dashboard API (summary, trends, executive-summary)
 │   │   ├── reports.ts        # Report API (list, get, generate)
 │   │   ├── health.ts         # Health check
@@ -119,7 +120,7 @@ kiryu/
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
 ├── packages/db/migrations/   # D1 SQL migrations (9 files)
-└── mcp-servers/security-dashboard/  # MCP server (57 tools)
+└── mcp-servers/security-dashboard/  # MCP server (60 tools)
 ```
 
 ## Key Files
@@ -128,7 +129,7 @@ kiryu/
 All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`. All clients have AbortController timeouts (10s OAuth, 20s data). All route handlers check `isConfigured()` before calling client methods.
 
 - **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
-- **Microsoft** — 11 modules across 3 API scopes (Graph, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Intune methods: `getIntuneDeviceAnalytics()` (managed devices with OS/encryption/stale analysis, paginates up to 10 pages), `getIntunePolicyAnalytics()` (compliance policies with pass rates, fetches deviceOverview for up to 20 policies), `getIntuneDetectedApps()` (top 30 apps by device count), `getIntuneSummary()` (orchestrates all 3). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
+- **Microsoft** — 11 modules across 3 API scopes (Graph v1.0, Graph beta, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Has `paginateGraph()` helper for OData `@odata.nextLink` pagination. Intune summary methods: `getIntuneDeviceAnalytics()`, `getIntunePolicyAnalytics()`, `getIntuneDetectedApps()`, `getIntuneSummary()`. Detailed Intune methods (for `/intune` page): `getManagedDevices()` (full v1.0 device list with ownership/jailbreak/supervised), `getManagedDevicesBeta()` (beta API with `hardwareInformation.lastRebootDateTime`), `getCompliancePolicySummary()`, `getCompliancePolicies()`, `getPolicyDeviceStatusSummary()`, `getIntuneDetailedSummary()` (orchestrates all with OS version currency, encryption, reboot hygiene, stale detection). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
 - **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data. **All OneAPI fetch methods (`ziaFetch`, `zpaFetch`, `zdxFetch`, ZINS `graphqlFetch`) auto-retry once on 401** — invalidate cached token, fetch fresh, retry. This handles Zscaler server-side token invalidation transparently.
@@ -154,17 +155,19 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
-- **Layout.tsx** — Base HTML shell with all CSS. Uses Outfit (sans) + JetBrains Mono (data values) fonts. Includes executive-specific styles (`.exec-headline` 3-col, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), platform status row (`.platform-status-row`), and `.sr-only` utility. Tab JS manages `aria-selected` state.
+- **IntuneDashboard.tsx** — Dedicated Intune device management page at `/intune`. Shows: fleet KPIs (total devices, compliance rate, encryption rate), health alerts (stale 30d+, reboot needed 14d+, jailbroken), OS breakdown by platform, ownership (corporate/personal), enrollment velocity, OS version currency bars per platform, per-policy compliance table, jailbroken/non-compliant/stale device tables with device details, reboot needed table (via beta API). Cross-navigation to main Security Dashboard.
+- **Layout.tsx** — Base HTML shell with all CSS. Uses Outfit (sans) + JetBrains Mono (data values) fonts. Includes executive-specific styles (`.exec-headline` 3-col, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), platform status row (`.platform-status-row`), page navigation (`.tab-link`, `.tab-active`), and `.sr-only` utility. Tab JS manages `aria-selected` state.
 
 ## API Routes
 
 Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `routes/health.ts`, `routes/sync.ts`, `routes/integrations/*.ts`
 
 - `GET /` — Dashboard UI (KV-cached, default `?period=24h`, `?refresh=true`)
+- `GET /intune` — Dedicated Intune device management page (KV-cached, `?refresh=true`)
 - `GET /health` — Health check (public, not behind Zero Trust)
 - `GET /api/dashboard/{summary,platforms/status,trends,threats/timeline,incidents/recent,tickets/metrics,executive-summary}` — Dashboard data APIs
 - `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
-- `GET /api/integrations/microsoft/{summary,alerts,defender/alerts,secure-score,recommendations,compliance,intune/summary,intune/devices,intune/policies,intune/apps}` — Microsoft (identity/incidents/machines only via `/summary`)
+- `GET /api/integrations/microsoft/{summary,alerts,defender/alerts,secure-score,recommendations,compliance,intune/summary,intune/devices,intune/policies,intune/apps,intune/stale,intune/reboot-needed,intune/compliance/policies}` — Microsoft (identity/incidents/machines only via `/summary`)
 - `GET /api/integrations/salesforce/{metrics,tickets,open,mttr,workload}` — Salesforce
 - `GET /api/integrations/meraki/{test,summary,devices,networks,vpn,uplinks}` — Meraki
 - `GET /api/integrations/zscaler/{test,summary,zia,zpa,zpa/connectors,zdx,zdx/apps,zdx/alerts,analytics,analytics/schema,risk360,diagnostic}` — Zscaler (`POST risk360` to set scores, `POST analytics/query` for raw ZINS GraphQL)
@@ -175,7 +178,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 57 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (10, including Intune devices/policies/apps/summary), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 60 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (13, including Intune summary/devices/policies/apps/stale/reboot-needed/compliance-policies), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -435,6 +438,12 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ### Microsoft Intune returns 403 / empty
 -> The app registration needs two additional permissions with admin consent: `DeviceManagementManagedDevices.Read.All` (for managed devices and detected apps) and `DeviceManagementConfiguration.Read.All` (for compliance policies and device overviews). Grant these in Azure Portal → App Registrations → API Permissions → Add Permission → Microsoft Graph → Application permissions. Click "Grant admin consent" after adding.
+
+### Intune reboot-needed returns empty
+-> The `/intune/reboot-needed` endpoint uses the Graph beta API for `hardwareInformation.lastRebootDateTime`. If reboot data is unavailable, the beta endpoint may not return this field for all device types. Windows devices typically report reboot timestamps; iOS/Android may not. The same `DeviceManagementManagedDevices.Read.All` permission is required.
+
+### Intune /intune page shows "Failed to load"
+-> The dedicated Intune page at `/intune` calls `getIntuneDetailedSummary()` which uses the Graph beta API. Ensure both `DeviceManagementManagedDevices.Read.All` and `DeviceManagementConfiguration.Read.All` permissions are granted with admin consent. Try `/api/integrations/microsoft/intune/summary` first to test basic Intune connectivity.
 
 ### Local dev with `wrangler dev --remote` requires cloudflared
 -> Install `cloudflared` via `brew install cloudflared`. The worker is behind Cloudflare Access, so `--remote` needs a tunnel. Alternatively, use `wrangler dev` (local mode) which uses `.dev.vars` secrets and local D1/KV/R2 preview bindings.

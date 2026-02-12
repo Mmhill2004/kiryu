@@ -260,6 +260,43 @@ const TOOLS = [
     },
   },
   {
+    name: "get_intune_stale_devices",
+    description:
+      "Get Intune managed devices that haven't synced in 30+ days (configurable via days parameter). Returns device details sorted by staleness. Useful for identifying devices that need attention or cleanup.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days since last sync to consider stale (default: 30)",
+        },
+      },
+    },
+  },
+  {
+    name: "get_intune_reboot_needed",
+    description:
+      "Get Intune managed devices that haven't been rebooted in 14+ days (configurable). Uses the Microsoft Graph beta API for hardware reboot timestamps. Helps identify devices with poor reboot hygiene.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days since last reboot to flag (default: 14)",
+        },
+      },
+    },
+  },
+  {
+    name: "get_intune_compliance_policies",
+    description:
+      "Get Intune compliance policies with per-policy device status breakdown: compliant, non-compliant, error counts, and pass rates for each policy.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
     name: "get_ngsiem_summary",
     description:
       "Get CrowdStrike NGSIEM/LogScale metrics including repository counts, data ingest volumes, saved searches, and recent event activity. Use this to understand log management and SIEM capabilities.",
@@ -770,6 +807,20 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_intune_detected_apps": {
       return apiRequest("/api/integrations/microsoft/intune/apps");
+    }
+
+    case "get_intune_stale_devices": {
+      const days = (args.days as number) || 30;
+      return apiRequest(`/api/integrations/microsoft/intune/stale?days=${days}`);
+    }
+
+    case "get_intune_reboot_needed": {
+      const days = (args.days as number) || 14;
+      return apiRequest(`/api/integrations/microsoft/intune/reboot-needed?days=${days}`);
+    }
+
+    case "get_intune_compliance_policies": {
+      return apiRequest("/api/integrations/microsoft/intune/compliance/policies");
     }
 
     case "get_ngsiem_summary": {
