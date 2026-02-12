@@ -16,10 +16,10 @@ export const uiRoutes = new Hono<{ Bindings: Env }>();
  */
 uiRoutes.get('/', async (c) => {
   const validPeriods = ['24h', '7d', '30d', '90d'] as const;
-  const rawPeriod = c.req.query('period') || '7d';
+  const rawPeriod = c.req.query('period') || '24h';
   const period = (validPeriods as readonly string[]).includes(rawPeriod)
     ? (rawPeriod as typeof validPeriods[number])
-    : '7d';
+    : '24h';
   const forceRefresh = c.req.query('refresh') === 'true';
   const daysBack = period === '24h' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90;
 
