@@ -288,6 +288,24 @@ Sync service uses `DB.batch()` for all bulk inserts instead of sequential statem
 ### Cache Invalidation
 `CacheService.invalidatePrefix()` uses cursor-based pagination to handle >1000 keys per prefix.
 
+### Zscaler OneAPI Token Auto-Retry on 401
+Zscaler can invalidate OneAPI tokens server-side before the 55-min KV cache TTL expires. All four OneAPI-backed fetch methods (`ziaFetch`, `zpaFetch`, `zdxFetch` in `auth.ts`, `graphqlFetch` in `analytics-client.ts`) implement automatic retry on 401:
+```typescript
+// Pattern used in all OneAPI fetch methods:
+resp = await fetch(url, { headers: { Authorization: `Bearer ${token}`, ... }, signal });
+if (resp.status === 401) {
+  console.warn(`... got 401 — refreshing OneAPI token and retrying`);
+  await this.invalidateOneApiToken();               // delete stale token from KV
+  const freshToken = await this.getOneApiToken(true); // force-fetch new token (bypasses cache)
+  resp = await fetch(url, { headers: { Authorization: `Bearer ${freshToken}`, ... }, signal });
+}
+```
+Key implementation details:
+- `getOneApiToken(forceRefresh)` — accepts boolean to bypass KV cache lookup and go straight to ZIdentity
+- `invalidateOneApiToken()` — deletes `zscaler:oneapi:token` from KV
+- Retry happens at most once per request — if the retry also returns 401, the error propagates normally (indicates a real permission/scope issue in ZIdentity, not a stale token)
+- The in-flight dedup (`pendingOneApi`) still works correctly with `forceRefresh` — concurrent 401 retries share a single token fetch
+
 ## Key Patterns
 
 ### KV Cache-First Loading
