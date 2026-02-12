@@ -80,8 +80,8 @@ export const IntuneDashboard: FC<Props> = ({ data, error }) => {
       )}
 
       {data && (
-        <main class="dashboard-wrapper">
-          <div class="grid" style="overflow-y: auto; flex: 1; align-content: start;">
+        <main class="dashboard-wrapper" style="height: auto;">
+          <div class="grid">
 
             {/* Row 1: Headline KPIs */}
             <div class="card col-4">
