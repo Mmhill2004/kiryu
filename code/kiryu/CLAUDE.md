@@ -160,7 +160,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
 
 Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `routes/health.ts`, `routes/sync.ts`, `routes/integrations/*.ts`
 
-- `GET /` — Dashboard UI (KV-cached, `?period=7d`, `?refresh=true`)
+- `GET /` — Dashboard UI (KV-cached, default `?period=24h`, `?refresh=true`)
 - `GET /health` — Health check (public, not behind Zero Trust)
 - `GET /api/dashboard/{summary,platforms/status,trends,threats/timeline,incidents/recent,tickets/metrics,executive-summary}` — Dashboard data APIs
 - `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
