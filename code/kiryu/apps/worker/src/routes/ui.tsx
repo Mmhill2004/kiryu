@@ -79,7 +79,7 @@ uiRoutes.get('/', async (c) => {
 
       // Fall back to live API with 25s timeout
       try {
-        const result = await withTimeout(csClient.getFullSummary(daysBack, 30), 25000);
+        const result = await withTimeout(csClient.getFullSummary(daysBack, 30), 10000);
         if (result) {
           crowdstrike = result;
           platforms.push({ platform: 'crowdstrike', status: 'healthy', last_sync: new Date().toISOString() });
@@ -114,7 +114,7 @@ uiRoutes.get('/', async (c) => {
       }
 
       try {
-        const result = await withTimeout(sfClient.getDashboardMetrics(), 25000);
+        const result = await withTimeout(sfClient.getDashboardMetrics(), 10000);
         if (result) {
           salesforce = result;
           platforms.push({ platform: 'salesforce', status: 'healthy', last_sync: new Date().toISOString() });
@@ -148,7 +148,7 @@ uiRoutes.get('/', async (c) => {
       }
 
       try {
-        const result = await withTimeout(msClient.getFullSummary(), 25000);
+        const result = await withTimeout(msClient.getFullSummary(), 10000);
         if (result) {
           microsoft = result;
           platforms.push({ platform: 'microsoft', status: 'healthy', last_sync: new Date().toISOString() });
@@ -191,7 +191,7 @@ uiRoutes.get('/', async (c) => {
         }
       }
       try {
-        const result = await withTimeout(zsClient.getFullSummary(), 25000);
+        const result = await withTimeout(zsClient.getFullSummary(), 10000);
         if (result) {
           zscaler = result;
           platforms.push({ platform: 'zscaler', status: 'healthy', last_sync: new Date().toISOString() });
@@ -231,7 +231,7 @@ uiRoutes.get('/', async (c) => {
         }
       }
       try {
-        const result = await withTimeout(mkClient.getSummary(), 25000);
+        const result = await withTimeout(mkClient.getSummary(), 10000);
         if (result) {
           meraki = result;
           platforms.push({ platform: 'meraki', status: 'healthy', last_sync: new Date().toISOString() });

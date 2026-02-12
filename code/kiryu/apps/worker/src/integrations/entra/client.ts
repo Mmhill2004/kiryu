@@ -364,7 +364,7 @@ export class EntraClient {
     const url = endpoint.startsWith('http') ? endpoint : `${this.graphUrl}${endpoint}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     try {
       const response = await fetch(url, {
@@ -378,7 +378,7 @@ export class EntraClient {
       return response.json() as Promise<T>;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Graph API timeout (20s): ${endpoint.split('?')[0]}`);
+        throw new Error(`Graph API timeout (12s): ${endpoint.split('?')[0]}`);
       }
       throw error;
     } finally {
@@ -391,7 +391,7 @@ export class EntraClient {
     const url = endpoint.startsWith('http') ? endpoint : `${this.betaUrl}${endpoint}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     try {
       const response = await fetch(url, {
@@ -405,7 +405,7 @@ export class EntraClient {
       return response.json() as Promise<T>;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Graph Beta API timeout (20s): ${endpoint.split('?')[0]}`);
+        throw new Error(`Graph Beta API timeout (12s): ${endpoint.split('?')[0]}`);
       }
       throw error;
     } finally {
@@ -509,7 +509,7 @@ export class EntraClient {
       const roles = rolesResponse.value || [];
 
       const roleDetails = await Promise.all(
-        roles.slice(0, 15).map(async (role) => {
+        roles.slice(0, 10).map(async (role) => {
           try {
             const membersResponse = await this.graphRequest<{ value: Array<{
               id: string; displayName: string; userPrincipalName: string;
