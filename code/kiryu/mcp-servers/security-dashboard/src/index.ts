@@ -297,6 +297,74 @@ const TOOLS = [
     },
   },
   {
+    name: "get_entra_summary",
+    description:
+      "Get full Entra ID (Azure AD) security summary: risky users, risk detections, MFA registration rates, conditional access policies, privileged role assignments, user hygiene (stale/guest users), app registration credential expiry, and sign-in activity (last 24h).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_entra_risky_users",
+    description:
+      "Get risky users from Entra ID Identity Protection: users flagged as at-risk or confirmed compromised, with risk level (high/medium/low) and risk state details.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_entra_risk_detections",
+    description:
+      "Get risk detection events (risky sign-ins) from Entra ID Identity Protection for the specified number of days. Includes risk type, location, IP address, and detection timing.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days to look back (default: 30)",
+        },
+      },
+    },
+  },
+  {
+    name: "get_entra_mfa_status",
+    description:
+      "Get MFA registration status across all users: total users, MFA registered count, MFA registration rate percentage.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_entra_conditional_access",
+    description:
+      "Get all Conditional Access policies with their state (enabled/report-only/disabled) and grant controls.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_entra_privileged_roles",
+    description:
+      "Get privileged directory role assignments: which roles are assigned, member counts, and the users in each role. Useful for identifying excessive Global Admin assignments.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_entra_app_credentials",
+    description:
+      "Get app registrations with expiring or expired credentials (secrets and certificates). Shows credentials expiring within 90 days sorted by urgency.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
     name: "get_ngsiem_summary",
     description:
       "Get CrowdStrike NGSIEM/LogScale metrics including repository counts, data ingest volumes, saved searches, and recent event activity. Use this to understand log management and SIEM capabilities.",
@@ -821,6 +889,35 @@ async function handleTool(name: string, args: Record<string, unknown>) {
 
     case "get_intune_compliance_policies": {
       return apiRequest("/api/integrations/microsoft/intune/compliance/policies");
+    }
+
+    case "get_entra_summary": {
+      return apiRequest("/api/integrations/entra/summary");
+    }
+
+    case "get_entra_risky_users": {
+      return apiRequest("/api/integrations/entra/risky-users");
+    }
+
+    case "get_entra_risk_detections": {
+      const days = (args.days as number) || 30;
+      return apiRequest(`/api/integrations/entra/risk-detections?days=${days}`);
+    }
+
+    case "get_entra_mfa_status": {
+      return apiRequest("/api/integrations/entra/mfa-status");
+    }
+
+    case "get_entra_conditional_access": {
+      return apiRequest("/api/integrations/entra/conditional-access");
+    }
+
+    case "get_entra_privileged_roles": {
+      return apiRequest("/api/integrations/entra/privileged-roles");
+    }
+
+    case "get_entra_app_credentials": {
+      return apiRequest("/api/integrations/entra/app-credentials");
     }
 
     case "get_ngsiem_summary": {

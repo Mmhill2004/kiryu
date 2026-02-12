@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { IntuneDashboard } from '../views/IntuneDashboard';
+import { EntraDashboard } from '../views/EntraDashboard';
+import { EntraClient, type EntraSummary } from '../integrations/entra/client';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
@@ -335,6 +337,40 @@ uiRoutes.get('/intune', async (c) => {
     console.error('Intune page error:', error instanceof Error ? error.message : error);
     return c.html(
       <IntuneDashboard data={null} error="Failed to load Intune data. Please try again." />
+    );
+  }
+});
+
+/**
+ * Dedicated Entra ID security page
+ */
+uiRoutes.get('/entra', async (c) => {
+  const client = new EntraClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.html(<EntraDashboard data={null} />);
+  }
+
+  const cache = new CacheService(c.env.CACHE);
+  const cacheKey = 'entra:summary';
+  const forceRefresh = c.req.query('refresh') === 'true';
+
+  // Try cache first
+  if (!forceRefresh) {
+    const cached = await cache.get<EntraSummary>(cacheKey);
+    if (cached) {
+      return c.html(<EntraDashboard data={cached.data} />);
+    }
+  }
+
+  try {
+    const summary = await client.getEntraSummary();
+    await cache.set(cacheKey, summary, CACHE_TTL.DASHBOARD_DATA);
+    return c.html(<EntraDashboard data={summary} />);
+  } catch (error) {
+    console.error('Entra page error:', error instanceof Error ? error.message : error);
+    return c.html(
+      <EntraDashboard data={null} error="Failed to load Entra data. Please try again." />
     );
   }
 });

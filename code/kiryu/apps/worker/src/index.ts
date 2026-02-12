@@ -12,6 +12,7 @@ import { microsoftRoutes } from './routes/integrations/microsoft';
 import { salesforceRoutes } from './routes/integrations/salesforce';
 import { cloudflareRoutes } from './routes/integrations/cloudflare';
 import { merakiRoutes } from './routes/integrations/meraki';
+import { entraRoutes } from './routes/integrations/entra';
 import { syncRoutes } from './routes/sync';
 import { reportRoutes } from './routes/reports';
 import { uiRoutes } from './routes/ui';
@@ -57,6 +58,7 @@ app.route('/api/integrations/microsoft', microsoftRoutes);
 app.route('/api/integrations/salesforce', salesforceRoutes);
 app.route('/api/integrations/cloudflare', cloudflareRoutes);
 app.route('/api/integrations/meraki', merakiRoutes);
+app.route('/api/integrations/entra', entraRoutes);
 
 // Report routes (Zero Trust handles auth)
 app.route('/api/reports', reportRoutes);

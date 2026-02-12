@@ -45,6 +45,7 @@ export const IntuneDashboard: FC<Props> = ({ data, error }) => {
           <nav style="display: flex; gap: 4px; margin-right: 16px;">
             <a href="/" class="tab-link">Security</a>
             <a href="/intune" class="tab-link tab-active">Intune</a>
+            <a href="/entra" class="tab-link">Entra ID</a>
           </nav>
 
           <a

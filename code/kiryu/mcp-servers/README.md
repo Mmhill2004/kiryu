@@ -4,13 +4,13 @@ This directory contains MCP (Model Context Protocol) servers that allow Claude D
 
 ## Overview
 
-MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 60 tools covering all integrated platforms.
+MCP servers provide a standardized way for AI assistants like Claude to access external tools and data sources. The security dashboard MCP server exposes 67 tools covering all integrated platforms.
 
 ## Security Dashboard MCP Server (`security-dashboard/`)
 
 A unified MCP server that connects to your Security Dashboard Worker API.
 
-### Tools (60)
+### Tools (67)
 
 #### Dashboard & Reports (7)
 | Tool | Description |
@@ -55,6 +55,17 @@ A unified MCP server that connects to your Security Dashboard Worker API.
 | `get_intune_stale_devices` | Devices not synced in 30+ days (configurable) |
 | `get_intune_reboot_needed` | Devices not rebooted in 14+ days (beta API) |
 | `get_intune_compliance_policies` | Per-policy compliance breakdown with pass rates |
+
+#### Entra ID (7)
+| Tool | Description |
+|------|-------------|
+| `get_entra_summary` | Full Entra ID security summary (all 8 domains) |
+| `get_entra_risky_users` | Risky users from Identity Protection |
+| `get_entra_risk_detections` | Risk detection events (risky sign-ins) |
+| `get_entra_mfa_status` | MFA registration status across all users |
+| `get_entra_conditional_access` | Conditional Access policies with state |
+| `get_entra_privileged_roles` | Privileged directory role assignments |
+| `get_entra_app_credentials` | App registrations with expiring credentials |
 
 #### Zscaler (9)
 | Tool | Description |
@@ -185,6 +196,11 @@ Once configured, you can ask Claude questions like:
 - "Show me devices by OS version for currency analysis"
 - "How many corporate vs personal devices are enrolled?"
 - "Are there any jailbroken or rooted devices?"
+- "What's the MFA registration rate?"
+- "Are there any risky users in Entra ID?"
+- "Show me expiring app credentials"
+- "What Conditional Access policies are enabled?"
+- "How many Global Admins do we have?"
 
 ## Development
 
