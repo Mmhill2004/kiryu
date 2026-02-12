@@ -33,6 +33,8 @@ export class SyncService {
       this.syncPlatform('microsoft').catch(e => this.handleSyncError('microsoft', e)),
       this.syncPlatform('salesforce').catch(e => this.handleSyncError('salesforce', e)),
       this.syncPlatform('meraki').catch(e => this.handleSyncError('meraki', e)),
+      this.syncPlatform('intune').catch(e => this.handleSyncError('intune', e)),
+      this.syncPlatform('entra').catch(e => this.handleSyncError('entra', e)),
     ];
 
     const syncResults = await Promise.all(syncPromises);
@@ -78,6 +80,12 @@ export class SyncService {
           break;
         case 'meraki':
           result = await this.syncMeraki();
+          break;
+        case 'intune':
+          result = await this.syncIntuneCache();
+          break;
+        case 'entra':
+          result = await this.syncEntraCache();
           break;
         default:
           throw new Error(`Unknown platform: ${platform}`);
@@ -597,23 +605,6 @@ export class SyncService {
       await this.cacheDashboardData(CACHE_KEYS.MICROSOFT_SUMMARY, summary);
     } catch (e) { console.warn('MS cache write failed:', e); }
 
-    // Pre-compute Intune detailed summary for /intune page
-    try {
-      const intuneDetail = await client.getIntuneDetailedSummary();
-      const cache = new CacheService(this.env.CACHE);
-      await cache.set('intune:detailed:summary', intuneDetail, CACHE_TTL.SYNC_DATA);
-    } catch (e) { console.warn('Intune pre-compute failed:', e); }
-
-    // Pre-compute Entra summary for /entra page
-    try {
-      const entraClient = new EntraClient(this.env);
-      if (entraClient.isConfigured()) {
-        const entraSummary = await entraClient.getEntraSummary();
-        const cache = new CacheService(this.env.CACHE);
-        await cache.set('entra:summary', entraSummary, CACHE_TTL.SYNC_DATA);
-      }
-    } catch (e) { console.warn('Entra pre-compute failed:', e); }
-
     return { platform: 'microsoft', status: 'success', recordsSynced };
   }
 
@@ -814,6 +805,30 @@ export class SyncService {
     } catch (e) { console.warn('MK cache write failed:', e); }
 
     return { platform: 'meraki', status: 'success', recordsSynced };
+  }
+
+  /** Pre-compute and cache Intune detailed summary (runs in parallel with other syncs) */
+  private async syncIntuneCache(): Promise<SyncResult> {
+    if (!this.env.AZURE_CLIENT_ID || !this.env.AZURE_CLIENT_SECRET || !this.env.AZURE_TENANT_ID) {
+      return { platform: 'intune', status: 'skipped', error: 'Not configured' };
+    }
+    const client = new MicrosoftClient(this.env);
+    const summary = await client.getIntuneDetailedSummary();
+    const cache = new CacheService(this.env.CACHE);
+    await cache.set('intune:detailed:summary', summary, CACHE_TTL.SYNC_DATA);
+    return { platform: 'intune', status: 'success', recordsSynced: 1 };
+  }
+
+  /** Pre-compute and cache Entra ID summary (runs in parallel with other syncs) */
+  private async syncEntraCache(): Promise<SyncResult> {
+    const entraClient = new EntraClient(this.env);
+    if (!entraClient.isConfigured()) {
+      return { platform: 'entra', status: 'skipped', error: 'Not configured' };
+    }
+    const summary = await entraClient.getEntraSummary();
+    const cache = new CacheService(this.env.CACHE);
+    await cache.set('entra:summary', summary, CACHE_TTL.SYNC_DATA);
+    return { platform: 'entra', status: 'success', recordsSynced: 1 };
   }
 
   /** Write data to KV under all period-specific keys so dashboard always has a cache hit */

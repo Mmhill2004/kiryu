@@ -472,7 +472,7 @@ export class EntraClient {
       return await this.paginate<UserRegistrationDetail>(
         '/reports/authenticationMethods/userRegistrationDetails?$top=999',
         (url) => this.graphRequest(url),
-        20
+        5
       );
     } catch (error) {
       console.warn('Failed to get MFA registration details:', error);
@@ -561,7 +561,7 @@ export class EntraClient {
       return await this.paginate<UserSignInActivity>(
         '/users?$select=id,displayName,userPrincipalName,userType,accountEnabled,createdDateTime,signInActivity&$top=999',
         (url) => this.betaRequest(url),
-        20
+        5
       );
     } catch (error) {
       console.warn('Failed to get user sign-in activity:', error);
