@@ -4,7 +4,20 @@ import type { EntraSummary } from '../integrations/entra/client';
 
 interface Props {
   data: EntraSummary | null;
+  cachedAt: string | null;
+  configured?: boolean;
   error?: string;
+}
+
+function dataAgeLabel(isoDate: string | null): string {
+  if (!isoDate) return '';
+  const ms = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function daysSinceLabel(isoDate: string | null): string {
@@ -47,7 +60,7 @@ function formatRiskType(type: string): string {
     .trim();
 }
 
-export const EntraDashboard: FC<Props> = ({ data, error }) => {
+export const EntraDashboard: FC<Props> = ({ data, cachedAt, configured = true, error }) => {
   return (
     <Layout title="Entra ID Security" scrollable>
       <header>
@@ -73,19 +86,30 @@ export const EntraDashboard: FC<Props> = ({ data, error }) => {
             <a href="/entra" class="tab-link tab-active">Entra ID</a>
           </nav>
 
-          <button hx-get="/entra?refresh=true" hx-target="body" hx-swap="outerHTML" class="refresh-btn" aria-label="Refresh Entra data">
+          {cachedAt && (
+            <span class="cache-age" style="font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-right: 12px; white-space: nowrap;" title={`Cached at ${cachedAt}`}>
+              Data: {dataAgeLabel(cachedAt)}
+            </span>
+          )}
+          <a href="/entra?refresh=true" class="refresh-btn" aria-label="Refresh Entra data">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
             Refresh
-          </button>
+          </a>
         </div>
       </header>
 
       {error && <div class="error-banner"><strong>Error:</strong> {error}</div>}
-      {!data && !error && (
+      {!data && !error && !configured && (
         <div class="error-banner" style="background: var(--medium-bg); border-color: rgba(234, 179, 8, 0.3);">
           Azure credentials not configured. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET.
+        </div>
+      )}
+      {!data && !error && configured && (
+        <div class="error-banner" style="background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3);">
+          Awaiting first data sync. Data will appear after the next cron cycle (every 15 minutes).
+          <a href="/entra?refresh=true" style="color: #60a5fa; margin-left: 8px;">Load now</a>
         </div>
       )}
       {data && data.errors.length > 0 && (

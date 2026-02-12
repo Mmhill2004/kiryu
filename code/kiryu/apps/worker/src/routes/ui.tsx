@@ -309,68 +309,80 @@ uiRoutes.get('/', async (c) => {
 
 /**
  * Dedicated Intune device management page
+ * Normal load: reads from KV cache only (instant). Live fetch only on ?refresh=true.
  */
 uiRoutes.get('/intune', async (c) => {
   const client = new MicrosoftClient(c.env);
 
   if (!client.isConfigured()) {
-    return c.html(<IntuneDashboard data={null} />);
+    return c.html(<IntuneDashboard data={null} cachedAt={null} configured={false} />);
   }
 
   const cache = new CacheService(c.env.CACHE);
   const cacheKey = 'intune:detailed:summary';
   const forceRefresh = c.req.query('refresh') === 'true';
 
-  // Try cache first
+  // Always check cache first
+  const cached = await cache.get<import('../integrations/microsoft/client').IntuneDetailedSummary>(cacheKey);
+
   if (!forceRefresh) {
-    const cached = await cache.get<import('../integrations/microsoft/client').IntuneDetailedSummary>(cacheKey);
-    if (cached) {
-      return c.html(<IntuneDashboard data={cached.data} />);
-    }
+    // Cache-only: show cached data or "awaiting sync" state
+    return c.html(<IntuneDashboard data={cached?.data ?? null} cachedAt={cached?.cachedAt ?? null} />);
   }
 
+  // Explicit refresh requested — fetch live, cache result
   try {
     const summary = await client.getIntuneDetailedSummary();
-    await cache.set(cacheKey, summary, CACHE_TTL.DASHBOARD_DATA);
-    return c.html(<IntuneDashboard data={summary} />);
+    await cache.set(cacheKey, summary, CACHE_TTL.SYNC_DATA);
+    return c.html(<IntuneDashboard data={summary} cachedAt={new Date().toISOString()} />);
   } catch (error) {
     console.error('Intune page error:', error instanceof Error ? error.message : error);
+    // On refresh failure, fall back to stale cache if available
+    if (cached) {
+      return c.html(<IntuneDashboard data={cached.data} cachedAt={cached.cachedAt} error="Refresh failed — showing cached data." />);
+    }
     return c.html(
-      <IntuneDashboard data={null} error="Failed to load Intune data. Please try again." />
+      <IntuneDashboard data={null} cachedAt={null} error="Failed to load Intune data. Please try again." />
     );
   }
 });
 
 /**
  * Dedicated Entra ID security page
+ * Normal load: reads from KV cache only (instant). Live fetch only on ?refresh=true.
  */
 uiRoutes.get('/entra', async (c) => {
   const client = new EntraClient(c.env);
 
   if (!client.isConfigured()) {
-    return c.html(<EntraDashboard data={null} />);
+    return c.html(<EntraDashboard data={null} cachedAt={null} configured={false} />);
   }
 
   const cache = new CacheService(c.env.CACHE);
   const cacheKey = 'entra:summary';
   const forceRefresh = c.req.query('refresh') === 'true';
 
-  // Try cache first
+  // Always check cache first
+  const cached = await cache.get<EntraSummary>(cacheKey);
+
   if (!forceRefresh) {
-    const cached = await cache.get<EntraSummary>(cacheKey);
-    if (cached) {
-      return c.html(<EntraDashboard data={cached.data} />);
-    }
+    // Cache-only: show cached data or "awaiting sync" state
+    return c.html(<EntraDashboard data={cached?.data ?? null} cachedAt={cached?.cachedAt ?? null} />);
   }
 
+  // Explicit refresh requested — fetch live, cache result
   try {
     const summary = await client.getEntraSummary();
-    await cache.set(cacheKey, summary, CACHE_TTL.DASHBOARD_DATA);
-    return c.html(<EntraDashboard data={summary} />);
+    await cache.set(cacheKey, summary, CACHE_TTL.SYNC_DATA);
+    return c.html(<EntraDashboard data={summary} cachedAt={new Date().toISOString()} />);
   } catch (error) {
     console.error('Entra page error:', error instanceof Error ? error.message : error);
+    // On refresh failure, fall back to stale cache if available
+    if (cached) {
+      return c.html(<EntraDashboard data={cached.data} cachedAt={cached.cachedAt} error="Refresh failed — showing cached data." />);
+    }
     return c.html(
-      <EntraDashboard data={null} error="Failed to load Entra data. Please try again." />
+      <EntraDashboard data={null} cachedAt={null} error="Failed to load Entra data. Please try again." />
     );
   }
 });
