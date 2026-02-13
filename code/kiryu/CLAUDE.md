@@ -48,12 +48,12 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 
 - **Runtime**: Cloudflare Workers
 - **Framework**: Hono (API + JSX views)
-- **Interactivity**: htmx
+- **Interactivity**: htmx (loading states)
 - **Typography**: Outfit (UI) + JetBrains Mono (data values)
 - **Database**: Cloudflare D1 (SQLite)
 - **Cache**: Cloudflare KV (20 min cron-written dashboard TTL, 5 min live-fetch fallback TTL, 29 min CS OAuth, 118 min SF OAuth, 58 min per-scope MS OAuth)
 - **Storage**: Cloudflare R2 (monthly executive reports)
-- **Validation**: Zod
+- **Validation**: Zod (dashboard API query params via `zValidator`)
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
 - **AI Integration**: MCP server with 69 tools
 
@@ -131,9 +131,9 @@ kiryu/
 ### Integration Clients (`integrations/*/client.ts`)
 All follow the same pattern: `isConfigured()` → OAuth with KV caching → `getFullSummary()` via `Promise.allSettled`. All clients have AbortController timeouts (10s OAuth, 12–20s data). All route handlers check `isConfigured()` before calling client methods.
 
-- **CrowdStrike** — 12 modules (Alerts, Hosts, Incidents, CrowdScore, Spotlight, ZTA, IDP, Discover, Sensors, Intel, NGSIEM, OverWatch). OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
-- **Microsoft** — 11 modules across 3 API scopes (Graph v1.0, Graph beta, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Returns pre-computed analytics (severity/status breakdowns). Constructor takes only `Env` (manages its own KV caching internally). Has `paginateGraph()` helper for OData `@odata.nextLink` pagination. Intune summary methods: `getIntuneDeviceAnalytics()`, `getIntunePolicyAnalytics()`, `getIntuneDetectedApps()`, `getIntuneSummary()`. Detailed Intune methods (for `/intune` page): `getManagedDevices()` (full v1.0 device list with ownership/jailbreak/supervised), `getManagedDevicesBeta()` (beta API with `hardwareInformation.lastRebootDateTime`), `getCompliancePolicySummary()`, `getCompliancePolicies()`, `getPolicyDeviceStatusSummary()`, `getIntuneDetailedSummary()` (orchestrates all with OS version currency, encryption, reboot hygiene, stale detection). Note: Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
-- **Entra ID** — 8 data domains (Risky Users, Risk Detections, MFA Registration, Conditional Access, Privileged Roles, User Hygiene, App Credentials, Sign-in Activity). Separate client from Microsoft — same Azure credentials, clean domain separation. KV-cached OAuth with in-flight dedup. AbortController timeouts (10s auth, 12s data). OData pagination with maxPages safety cap (5 pages for user lists). Beta API for signInActivity on users.
+- **CrowdStrike** — OAuth KV-backed (29 min TTL). Constructor takes optional `KVNamespace` cache param. IDP uses alerts API with `product:'idp'` filter. Discover uses timestamp-based FQL. Sensors derived from hosts API.
+- **Microsoft** — 3 API scopes (Graph v1.0, Graph beta, Defender/SecurityCenter, Azure Management). Per-scope OAuth with in-flight dedup. Constructor takes only `Env` (manages its own KV caching internally). Has `paginateGraph()` helper for OData `@odata.nextLink` pagination. Intune summary: `getIntuneSummary()`. Detailed Intune (for `/intune` page): `getIntuneDetailedSummary()` orchestrates `getManagedDevices()`, `getManagedDevicesBeta()`, `getCompliancePolicies()`, `getPolicyDeviceStatusSummary()`. Identity, Incidents, and Machines only accessible via `/summary` (no dedicated routes yet).
+- **Entra ID** — Separate client from Microsoft — same Azure credentials, clean domain separation. KV-cached OAuth with in-flight dedup. AbortController timeouts (10s auth, 12s data). OData pagination with maxPages safety cap (5 pages for user lists). Beta API for signInActivity on users.
 - **Salesforce** — SOQL-based. OAuth KV-backed (118 min TTL). Constructor takes optional `KVNamespace` cache param. `getDashboardMetrics()` returns all KPIs in one call.
 - **Meraki** — Static API key auth (no OAuth, no token caching). Constructor takes `Env`. Must follow redirects (`redirect: 'follow'`) — Meraki 302s to region shards. Rate limit: 10 req/sec per-org shared across all API consumers. `getSummary()` aggregates device overview, statuses, networks, VPN, uplinks, and licensing.
 - **Zscaler** — 6-file multi-client architecture: `client.ts` (orchestrator), `auth.ts` (OneAPI + legacy auth), `zia-client.ts`, `zpa-client.ts`, `zdx-client.ts`, `analytics-client.ts`. Supports both OneAPI (new) and legacy per-module credentials with fallback logic. Risk360 scores stored manually in KV (no API available). `getFullSummary()` returns ZIA, ZPA, ZDX, Analytics (ZINS), Risk360 data. **All OneAPI fetch methods (`ziaFetch`, `zpaFetch`, `zdxFetch`, ZINS `graphqlFetch`) auto-retry once on 401** — invalidate cached token, fetch fresh, retry. This handles Zscaler server-side token invalidation transparently.
@@ -285,7 +285,7 @@ Key type patterns:
 - `ContentfulStatusCode` (from `hono/utils/http-status`) for `ApiError.statusCode` — Hono's `c.json()` rejects 1xx codes
 - `Record<string, number>` property access returns `number | undefined` — always use `?? 0`
 - Arrow function generics in `.tsx` files parse as JSX tags — use `function` declarations instead
-- All optional integration credentials (Abnormal, Zscaler, Meraki, Cloudflare) are typed as optional `string?` in `Env` — clients check with `isConfigured()`
+- Optional integration credentials (Zscaler, Meraki, Cloudflare) are typed as `string?` in `Env` — clients check with `isConfigured()`. Note: `ABNORMAL_API_TOKEN` is typed as required `string` but also uses `isConfigured()` at runtime
 - D1 query results: use `.all<Record<string, unknown>>()` — never `any`. Cast fields explicitly (e.g., `r.date as string`, `typeof val === 'number' ? val : 0`)
 - Null checks: use strict `=== null` (not falsy `!value`) when checking for missing API sub-module data — avoids treating `0` or `""` as missing
 
@@ -417,95 +417,22 @@ cd apps/worker && npx wrangler deploy src/index.ts
 
 ## Troubleshooting
 
+For platform-specific issues (permissions, empty responses, 403/401 errors), see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
+
 ### Salesforce "no client credentials user enabled"
 -> Configure Run As user in Connected App: Manage -> Edit Policies -> Client Credentials Flow -> Run As
 
-### Salesforce "request not supported on this domain"
--> Use your My Domain URL (e.g., `https://yourorg.my.salesforce.com`) not `login.salesforce.com`
-
-### Microsoft authentication failed / AADSTS7000215 invalid_client
--> The `AZURE_CLIENT_SECRET` must be the **Secret Value** (shown once at creation), NOT the Secret ID. Go to App Registrations → Certificates & secrets → create a new secret if the value is no longer visible.
-
-### Microsoft authentication failed / 401 errors
--> Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET are set correctly. Ensure admin consent was granted for all API permissions in the Azure portal.
-
-### Microsoft Defender for Endpoint returns empty
--> Ensure the app registration has `WindowsDefenderATP Alert.Read.All` permission with admin consent granted. The Defender API uses a separate scope (`api.securitycenter.microsoft.com/.default`).
-
-### Microsoft Cloud Defender recommendations return empty
--> Set `AZURE_SUBSCRIPTION_ID` secret to scope the query to a specific subscription. The provider-level endpoint may return empty without subscription context.
-
-### CrowdStrike 403 errors
--> Check API client scopes in Falcon console. Use the `/api/integrations/crowdstrike/diagnostic` endpoint to see which scopes are accessible. Required scopes: Alerts, Hosts, Incidents, Spotlight, ZTA, NGSIEM, OverWatch, Identity Protection, Discover, Sensor Usage, Intel Actors/Indicators/Reports.
-
-### CrowdStrike Identity Protection returns empty
--> IDP detections are fetched via the alerts API with `product:'idp'` filter (the GraphQL `detections` query type was deprecated). Ensure the "Alerts (Read)" scope is enabled. If still empty, there may be no IDP alerts in the last 30 days.
-
-### CrowdStrike Spotlight returns empty
--> Spotlight API requires a FQL filter — empty filter returns nothing. The client always passes `status:'open'` as minimum. If still empty, ensure the "Vulnerabilities / Spotlight (Read)" scope is enabled.
-
-### CrowdStrike Discover "invalid filter" / "operator not allowed"
--> Discover API FQL filters do not support `id:>'0'`. Use timestamp-based filters (e.g., `last_seen_timestamp:>='...'`). The client already handles this.
-
-### CrowdStrike Sensor Usage 404
--> The `/sensor-usage/combined/weekly/v1` endpoint is not available. Sensor count is derived from the hosts API instead.
-
-### CrowdStrike NGSIEM / OverWatch 404
--> These modules return 404 if LogScale or OverWatch are not provisioned in the CrowdStrike instance. The diagnostic endpoint reports which modules are available. These fail gracefully in `getFullSummary()` (NGSIEM/OverWatch use default empty values).
+### Microsoft AADSTS7000215 invalid_client
+-> The `AZURE_CLIENT_SECRET` must be the **Secret Value** (shown once at creation), NOT the Secret ID. Go to App Registrations -> Certificates & secrets -> create a new secret if the value is no longer visible.
 
 ### curl returns 302 redirect to production
 -> All endpoints except /health are behind Cloudflare Zero Trust. Use the dashboard UI or MCP server for authenticated access.
 
-### Microsoft Risky Users / Incidents return empty
--> Ensure the app registration has `IdentityRiskyUser.Read.All` and `SecurityIncident.Read.All` permissions with admin consent granted in the Azure portal.
-
-### Microsoft Defender Machines return empty
--> Ensure the app registration has `WindowsDefenderATP Machine.Read.All` permission with admin consent. Uses the Security Center API scope (`api.securitycenter.microsoft.com/.default`).
-
-### Microsoft Intune returns 403 / empty
--> The app registration needs two additional permissions with admin consent: `DeviceManagementManagedDevices.Read.All` (for managed devices and detected apps) and `DeviceManagementConfiguration.Read.All` (for compliance policies and device overviews). Grant these in Azure Portal → App Registrations → API Permissions → Add Permission → Microsoft Graph → Application permissions. Click "Grant admin consent" after adding.
-
-### Intune reboot-needed returns empty
--> The `/intune/reboot-needed` endpoint uses the Graph beta API for `hardwareInformation.lastRebootDateTime`. If reboot data is unavailable, the beta endpoint may not return this field for all device types. Windows devices typically report reboot timestamps; iOS/Android may not. The same `DeviceManagementManagedDevices.Read.All` permission is required.
-
-### Intune /intune page shows "Failed to load"
--> The dedicated Intune page at `/intune` calls `getIntuneDetailedSummary()` which uses the Graph beta API. Ensure both `DeviceManagementManagedDevices.Read.All` and `DeviceManagementConfiguration.Read.All` permissions are granted with admin consent. Try `/api/integrations/microsoft/intune/summary` first to test basic Intune connectivity.
-
-### Entra ID returns 403 or empty data
--> Ensure the app registration has `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `UserAuthenticationMethod.Read.All`, `Policy.Read.All`, `RoleManagement.Read.Directory`, `User.Read.All`, `AuditLog.Read.All`, and `Application.Read.All` permissions with admin consent granted. Risk detections and risky users require Entra ID P2 license. MFA registration details require at least Entra ID P1.
+### Testing production endpoints via curl
+-> Use `cloudflared access token -app="https://security-dashboard-api.rodgersbuilders.workers.dev"` to get a CF Access JWT, then pass it as: `curl -H "cookie: CF_Authorization=$TOKEN" https://security-dashboard-api.rodgersbuilders.workers.dev/api/...`
 
 ### Local dev with `wrangler dev --remote` requires cloudflared
 -> Install `cloudflared` via `brew install cloudflared`. The worker is behind Cloudflare Access, so `--remote` needs a tunnel. Alternatively, use `wrangler dev` (local mode) which uses `.dev.vars` secrets and local D1/KV/R2 preview bindings.
 
-### Testing production endpoints via curl
--> Use `cloudflared access token -app="https://security-dashboard-api.rodgersbuilders.workers.dev"` to get a CF Access JWT, then pass it as: `curl -H "cookie: CF_Authorization=$TOKEN" https://security-dashboard-api.rodgersbuilders.workers.dev/api/...`
-
-### Meraki 429 rate limited
--> Meraki allows 10 req/sec per-org, shared across ALL API consumers. The client uses org-level endpoints to minimize calls. If rate-limited, the `Retry-After` header indicates wait time (1–10 min). Cache aggressively — the 5-min KV TTL should keep requests well under budget.
-
-### Meraki 302/307 redirects
--> Meraki routes requests to regional shards via redirects. The client uses `redirect: 'follow'` in fetch. If you see redirect-related errors, ensure the runtime supports automatic redirect following.
-
-### Meraki returns empty device list
--> Ensure `MERAKI_ORG_ID` is set correctly. Use `/api/integrations/meraki/test` to verify connectivity — it lists all organizations the API key can access. The org ID is the numeric string shown in that response.
-
-### Zscaler ZIA/ZPA/ZDX return 401 "unauthorized" through OneAPI
--> The API client in ZIdentity must have ZIA, ZPA, and ZDX scopes explicitly assigned. Token fetch succeeding does not mean the token has access to all services. After updating permissions in ZIdentity, flush the cached token: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=445b6afd3f1044bb9b84c22e32db3f5c --remote`
-
-### Zscaler ZDX /devices or /alerts returns 400 Bad Request
--> The ZDX API does NOT accept `limit` or `offset` query parameters — it uses cursor-based pagination via `next_offset` in the response. Only pass `since` (hours, e.g. `?since=2`). The `/apps`, `/devices`, and `/alerts` endpoints all use the same `since` parameter format.
-
-### Zscaler ZINS Analytics returns no data
--> The ZINS GraphQL API uses UPPERCASE root fields (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`) and epoch millisecond timestamps. CYBER_SECURITY requires exactly 7 or 14-day intervals with end_time at least 1 day before now. IOT returns 403 if not provisioned. FIREWALL is not in the schema. Use `POST /api/integrations/zscaler/analytics/query` to test raw GraphQL queries. Introspection is disabled by Zscaler.
-
-### Zscaler Risk360 / ZRA returns "Permission Denied" or 401
--> Risk360 does not have a public API (as of Feb 2026). The ZINS `RISK_SCORE` GraphQL type exists but is not queryable — the Zscaler SDK team confirmed it was "incorrectly created for GraphQL types not exposed in the root Query" (PR #443). REST paths `/zra/` and `/risk360/` are not registered on the OneAPI gateway. Use the manual KV approach: `POST /api/integrations/zscaler/risk360` to set scores.
-
-### Zscaler ZIA/ZPA/ZDX/ZINS suddenly return 401 after working previously
--> All OneAPI fetch methods now auto-retry on 401: they invalidate the cached token, fetch a fresh one, and retry the request. This handles Zscaler server-side token invalidation transparently. If data is still blank after a refresh, the issue is likely a scope/permission problem in ZIdentity (not a stale token). Use `/api/integrations/zscaler/diagnostic` to verify. Manual flush if needed: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=445b6afd3f1044bb9b84c22e32db3f5c --remote`
-
-### Zscaler cached token doesn't reflect new permissions
--> OneAPI tokens are cached in KV for 55 minutes (`zscaler:oneapi:token`). After changing API client scopes in ZIdentity, flush the cached token: `npx wrangler kv key delete "zscaler:oneapi:token" --namespace-id=445b6afd3f1044bb9b84c22e32db3f5c --remote`
-
 ### Deploy fails with "No project was selected"
--> Run from `apps/worker/` directory: `npx wrangler deploy src/index.ts` (not `pnpm deploy` from root)
+-> Run from `apps/worker/` directory: `cd apps/worker && npx wrangler deploy` (or `pnpm deploy` from the monorepo root)
