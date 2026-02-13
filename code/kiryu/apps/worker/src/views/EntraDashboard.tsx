@@ -83,7 +83,8 @@ export const EntraDashboard: FC<Props> = ({ data, cachedAt, configured = true, e
           <nav style="display: flex; gap: 4px; margin-right: 16px;">
             <a href="/" class="tab-link">Security</a>
             <a href="/intune" class="tab-link">Intune</a>
-            <a href="/entra" class="tab-link tab-active">Entra ID</a>
+            <a href="/entra" class="tab-link">Entra ID</a>
+            <a href="/azure-dc" class="tab-link">Azure DC</a>
           </nav>
 
           {cachedAt && (

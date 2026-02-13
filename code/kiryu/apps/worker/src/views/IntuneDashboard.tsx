@@ -59,6 +59,7 @@ export const IntuneDashboard: FC<Props> = ({ data, cachedAt, configured = true, 
             <a href="/" class="tab-link">Security</a>
             <a href="/intune" class="tab-link tab-active">Intune</a>
             <a href="/entra" class="tab-link">Entra ID</a>
+            <a href="/azure-dc" class="tab-link">Azure DC</a>
           </nav>
 
           {cachedAt && (

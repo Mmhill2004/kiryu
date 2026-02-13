@@ -3,7 +3,11 @@ import type { Env } from '../types/env';
 import { Dashboard } from '../views/Dashboard';
 import { IntuneDashboard } from '../views/IntuneDashboard';
 import { EntraDashboard } from '../views/EntraDashboard';
+import { AzureDCDashboard } from '../views/AzureDCDashboard';
 import { EntraClient, type EntraSummary } from '../integrations/entra/client';
+import { AzureResourceClient } from '../integrations/azure/resource-client';
+import { buildTopology, type BuiltTopology } from '../services/topology-builder';
+import { renderTopologySVG, type SVGTopology } from '../services/topology-svg';
 import { CrowdStrikeClient } from '../integrations/crowdstrike/client';
 import { SalesforceClient, type TicketMetrics } from '../integrations/salesforce/client';
 import { MicrosoftClient, type MicrosoftFullSummary } from '../integrations/microsoft/client';
@@ -383,6 +387,61 @@ uiRoutes.get('/entra', async (c) => {
     }
     return c.html(
       <EntraDashboard data={null} cachedAt={null} error="Failed to load Entra data. Please try again." />
+    );
+  }
+});
+
+/**
+ * Dedicated Azure DC topology page
+ * Normal load: reads from KV cache only (instant). Live fetch only on ?refresh=true.
+ */
+uiRoutes.get('/azure-dc', async (c) => {
+  const client = new AzureResourceClient(c.env);
+
+  if (!client.isConfigured()) {
+    return c.html(<AzureDCDashboard topology={null} svg={null} cachedAt={null} configured={false} />);
+  }
+
+  const cache = new CacheService(c.env.CACHE);
+  const cacheKey = CACHE_KEYS.AZURE_DC_TOPOLOGY;
+  const forceRefresh = c.req.query('refresh') === 'true';
+
+  // Always check cache first
+  const cached = await cache.get<{ topology: BuiltTopology; svg: SVGTopology }>(cacheKey);
+
+  if (!forceRefresh) {
+    // Cache-only: show cached data or "awaiting sync" state
+    return c.html(
+      <AzureDCDashboard
+        topology={cached?.data.topology ?? null}
+        svg={cached?.data.svg ?? null}
+        cachedAt={cached?.cachedAt ?? null}
+      />
+    );
+  }
+
+  // Explicit refresh requested — fetch live, cache result
+  try {
+    const raw = await client.getTopology();
+    const topology = buildTopology(raw);
+    const svg = renderTopologySVG(topology);
+    await cache.set(cacheKey, { topology, svg }, CACHE_TTL.SYNC_DATA);
+    return c.html(<AzureDCDashboard topology={topology} svg={svg} cachedAt={new Date().toISOString()} />);
+  } catch (error) {
+    console.error('Azure DC page error:', error instanceof Error ? error.message : error);
+    // On refresh failure, fall back to stale cache if available
+    if (cached) {
+      return c.html(
+        <AzureDCDashboard
+          topology={cached.data.topology}
+          svg={cached.data.svg}
+          cachedAt={cached.cachedAt}
+          error="Refresh failed — showing cached data."
+        />
+      );
+    }
+    return c.html(
+      <AzureDCDashboard topology={null} svg={null} cachedAt={null} error="Failed to load Azure DC data. Please try again." />
     );
   }
 });

@@ -65,6 +65,7 @@ export const CACHE_KEYS = {
   MICROSOFT_SUMMARY: 'ms:summary',
   ZSCALER_SUMMARY: 'zs:summary',
   MERAKI_SUMMARY: 'mk:summary',
+  AZURE_DC_TOPOLOGY: 'azure-dc:topology',
   CROWDSTRIKE_TOKEN: 'auth:cs:token',
   SALESFORCE_TOKEN: 'auth:sf:token',
   REPORT_GENERATED: 'report:generated',

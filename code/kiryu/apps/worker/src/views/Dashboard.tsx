@@ -386,6 +386,7 @@ export const Dashboard: FC<Props> = ({ data }) => {
               <a href="/" class="tab-link tab-active">Security</a>
               <a href="/intune" class="tab-link">Intune</a>
               <a href="/entra" class="tab-link">Entra ID</a>
+              <a href="/azure-dc" class="tab-link">Azure DC</a>
             </nav>
             <p class="cache-indicator">
               {dataSource === 'cache' && cachedAt

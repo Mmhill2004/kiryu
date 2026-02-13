@@ -6,6 +6,9 @@ import { MicrosoftClient } from '../integrations/microsoft/client';
 import { SalesforceClient } from '../integrations/salesforce/client';
 import { MerakiClient } from '../integrations/meraki/client';
 import { EntraClient } from '../integrations/entra/client';
+import { AzureResourceClient } from '../integrations/azure/resource-client';
+import { buildTopology } from './topology-builder';
+import { renderTopologySVG } from './topology-svg';
 import { CacheService, CACHE_KEYS, CACHE_TTL } from './cache';
 
 export interface SyncResult {
@@ -35,6 +38,7 @@ export class SyncService {
       this.syncPlatform('meraki').catch(e => this.handleSyncError('meraki', e)),
       this.syncPlatform('intune').catch(e => this.handleSyncError('intune', e)),
       this.syncPlatform('entra').catch(e => this.handleSyncError('entra', e)),
+      this.syncPlatform('azure-dc').catch(e => this.handleSyncError('azure-dc', e)),
     ];
 
     const syncResults = await Promise.all(syncPromises);
@@ -86,6 +90,9 @@ export class SyncService {
           break;
         case 'entra':
           result = await this.syncEntraCache();
+          break;
+        case 'azure-dc':
+          result = await this.syncAzureDC();
           break;
         default:
           throw new Error(`Unknown platform: ${platform}`);
@@ -831,6 +838,53 @@ export class SyncService {
     return { platform: 'entra', status: 'success', recordsSynced: 1 };
   }
 
+  private async syncAzureDC(): Promise<SyncResult> {
+    const client = new AzureResourceClient(this.env);
+    if (!client.isConfigured()) {
+      return { platform: 'azure-dc', status: 'skipped', error: 'Not configured' };
+    }
+
+    const raw = await client.getTopology();
+    const topology = buildTopology(raw);
+    const svg = renderTopologySVG(topology);
+
+    // Pre-cache topology + SVG to KV for instant page loads
+    const cache = new CacheService(this.env.CACHE);
+    await cache.set(CACHE_KEYS.AZURE_DC_TOPOLOGY, { topology, svg }, CACHE_TTL.SYNC_DATA);
+
+    // Store daily snapshot in D1 for trend tracking
+    const date = new Date().toISOString().split('T')[0];
+    try {
+      await this.env.DB.prepare(`
+        INSERT OR REPLACE INTO azure_dc_metrics_daily (
+          date, total_vnets, total_subnets, peering_count,
+          total_vms, running_vms, deallocated_vms, stopped_vms,
+          total_public_ips, total_nsgs, total_load_balancers
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        date,
+        topology.stats.totalVNets,
+        topology.stats.totalSubnets,
+        topology.stats.peeringCount,
+        topology.stats.totalVMs,
+        topology.stats.runningVMs,
+        topology.stats.deallocatedVMs,
+        topology.stats.stoppedVMs,
+        topology.stats.totalPublicIPs,
+        topology.stats.totalNSGs,
+        topology.stats.totalLoadBalancers,
+      ).run();
+    } catch (e) {
+      console.warn('Azure DC D1 snapshot failed:', e);
+    }
+
+    return {
+      platform: 'azure-dc',
+      status: 'success',
+      recordsSynced: topology.stats.totalVMs + topology.stats.totalVNets,
+    };
+  }
+
   /** Write data to KV under all period-specific keys so dashboard always has a cache hit */
   private async cacheDashboardData<T>(prefix: string, data: T): Promise<void> {
     const cache = new CacheService(this.env.CACHE);
@@ -855,6 +909,7 @@ export class SyncService {
       ['zscaler_metrics_daily', 'date'],
       ['meraki_metrics_daily', 'date'],
       ['microsoft_metrics_daily', 'date'],
+      ['azure_dc_metrics_daily', 'date'],
       ['daily_summaries', 'date'],
       ['security_events', 'created_at'],
       ['sync_logs', 'started_at'],
@@ -866,6 +921,7 @@ export class SyncService {
       { name: 'zscaler_metrics_daily', dateCol: 'date' },
       { name: 'meraki_metrics_daily', dateCol: 'date' },
       { name: 'microsoft_metrics_daily', dateCol: 'date' },
+      { name: 'azure_dc_metrics_daily', dateCol: 'date' },
       { name: 'daily_summaries', dateCol: 'date' },
       { name: 'security_events', dateCol: 'created_at' },
       { name: 'sync_logs', dateCol: 'started_at' },
