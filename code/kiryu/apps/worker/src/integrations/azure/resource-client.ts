@@ -401,30 +401,39 @@ export class AzureResourceClient {
 
   async listVirtualMachines(): Promise<AzureVM[]> {
     const subId = this.env.AZURE_SUBSCRIPTION_ID;
-    const rawVMs = await this.paginateArm<RawVM>(
-      `${ARM_BASE}/subscriptions/${subId}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView`
-    );
 
-    return rawVMs.map(vm => {
-      const instanceView = (vm as RawVM & { properties: { instanceView?: { statuses?: Array<{ code: string }> } } })
-        .properties.instanceView;
-      const powerCode = instanceView?.statuses?.find(s => s.code.startsWith('PowerState/'))?.code;
-      const powerState = powerCode?.replace('PowerState/', '') ?? 'unknown';
+    // Fetch full VM properties and status-only views in parallel
+    // ($expand=instanceView is not supported at subscription level — use statusOnly)
+    interface StatusVM { id: string; properties?: { instanceView?: { statuses?: Array<{ code: string }> } } }
+    const [rawVMs, statusVMs] = await Promise.all([
+      this.paginateArm<RawVM>(
+        `${ARM_BASE}/subscriptions/${subId}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01`
+      ),
+      this.paginateArm<StatusVM>(
+        `${ARM_BASE}/subscriptions/${subId}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&statusOnly=true`
+      ),
+    ]);
 
-      return {
-        id: vm.id,
-        name: vm.name,
-        resourceGroup: parseResourceGroup(vm.id),
-        location: vm.location,
-        vmSize: vm.properties.hardwareProfile.vmSize,
-        osType: vm.properties.storageProfile.osDisk.osType || 'Unknown',
-        powerState,
-        nicIds: vm.properties.networkProfile.networkInterfaces.map(n => n.id.toLowerCase()),
-        privateIP: '',
-        publicIP: null,
-        subnetId: null,
-      };
-    });
+    // Build power state lookup from status-only response
+    const powerStates = new Map<string, string>();
+    for (const svm of statusVMs) {
+      const code = svm.properties?.instanceView?.statuses?.find(s => s.code.startsWith('PowerState/'))?.code;
+      if (code) powerStates.set(svm.id.toLowerCase(), code.replace('PowerState/', ''));
+    }
+
+    return rawVMs.map(vm => ({
+      id: vm.id,
+      name: vm.name,
+      resourceGroup: parseResourceGroup(vm.id),
+      location: vm.location,
+      vmSize: vm.properties.hardwareProfile.vmSize,
+      osType: vm.properties.storageProfile.osDisk.osType || 'Unknown',
+      powerState: powerStates.get(vm.id.toLowerCase()) ?? 'unknown',
+      nicIds: vm.properties.networkProfile.networkInterfaces.map(n => n.id.toLowerCase()),
+      privateIP: '',
+      publicIP: null,
+      subnetId: null,
+    }));
   }
 
   async listVirtualNetworks(): Promise<AzureVNet[]> {

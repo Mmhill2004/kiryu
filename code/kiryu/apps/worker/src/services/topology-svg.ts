@@ -24,7 +24,8 @@ export interface SVGTopology {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function escapeXml(str: string): string {
+function escapeXml(str: string | undefined | null): string {
+  if (!str) return '';
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
