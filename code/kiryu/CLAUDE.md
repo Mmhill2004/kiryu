@@ -29,7 +29,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
   └───────┘     └─────────┘     └───────┘
 ```
 
-**Data flow:** Cron syncs every 15 min → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL) → Dashboard/Intune/Entra pages read from KV only (instant). Live API calls only happen on explicit `?refresh=true`. On the 1st of each month, cron generates an HTML executive report and stores it in R2.
+**Data flow:** Cron syncs every 15 min → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL) → Dashboard/Intune/Entra/Azure DC pages read from KV only (instant). Live API calls only happen on explicit `?refresh=true`. On the 1st of each month, cron generates an HTML executive report and stores it in R2.
 
 ## Current Integration Status
 
@@ -42,6 +42,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 | **Abnormal** | ✅ Active | Email threats, cases, stats. Bearer token auth. |
 | **Zscaler** | ✅ Active | ZIA, ZPA, ZDX, Z-Insights (ZINS GraphQL: web traffic, cyber security, shadow IT). Risk360 manual only (no API). OneAPI via ZIdentity OAuth2. |
 | **Entra ID** | ✅ Active | Risky Users, Risk Detections, MFA Registration, Conditional Access, Privileged Roles, User Hygiene, App Credentials, Sign-in Activity |
+| **Azure DC** | ✅ Active | ARM topology: VNets, Subnets, VMs, NICs, NSGs, Public IPs, Load Balancers, Route Tables, Peerings. Server-side SVG visualization. |
 | **Cloudflare** | ✅ Active | Access logs, Gateway logs, Security events, Access apps. Bearer token auth. |
 
 ## Tech Stack
@@ -76,6 +77,7 @@ wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0006_z
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0007_meraki_metrics.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0008_zscaler_analytics_extended.sql --remote
 wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0009_microsoft_metrics.sql --remote
+wrangler d1 execute security-dashboard-db --file=./packages/db/migrations/0010_azure_dc_metrics.sql --remote
 
 # Add secrets
 wrangler secret put SECRET_NAME --name security-dashboard-api
@@ -97,10 +99,11 @@ kiryu/
 │   │   ├── Dashboard.tsx     # Main dashboard with trends + cache indicator
 │   │   ├── IntuneDashboard.tsx # Dedicated Intune device management page
 │   │   ├── EntraDashboard.tsx  # Entra ID identity security page
+│   │   ├── AzureDCDashboard.tsx # Azure DC network topology page
 │   │   ├── ReportTemplate.tsx # Self-contained HTML monthly report
 │   │   └── components/       # MetricCard, GaugeChart, DonutChart, SecurityScore, ThreatChart
 │   ├── routes/
-│   │   ├── ui.tsx            # Dashboard HTML route (/) + Intune page (/intune) + Entra page (/entra) with KV cache
+│   │   ├── ui.tsx            # Dashboard HTML route (/) + Intune (/intune) + Entra (/entra) + Azure DC (/azure-dc) with KV cache
 │   │   ├── dashboard.ts      # Dashboard API (summary, trends, executive-summary)
 │   │   ├── reports.ts        # Report API (list, get, generate)
 │   │   ├── health.ts         # Health check
@@ -111,6 +114,7 @@ kiryu/
 │   │   ├── salesforce/client.ts   # Full: Tickets, MTTR, SLA, Workload
 │   │   ├── microsoft/client.ts    # Full: Entra Alerts, Defender, Secure Score, Compliance, Recommendations, Risky Users, Incidents, Machines
 │   │   ├── entra/client.ts          # Full: Risky Users, Risk Detections, MFA Status, CA Policies, Privileged Roles, User Hygiene, App Credentials, Sign-ins
+│   │   ├── azure/resource-client.ts # Full: ARM topology (VMs, VNets, NICs, NSGs, Public IPs, LBs, Route Tables)
 │   │   ├── meraki/client.ts       # Full: Device statuses, VPN tunnels, Uplinks, Licensing
 │   │   ├── abnormal/client.ts     # Full: Threats, Cases, Stats
 │   │   ├── zscaler/              # Full: 6 files (client.ts, auth.ts, zia-client.ts, zpa-client.ts, zdx-client.ts, analytics-client.ts)
@@ -119,10 +123,12 @@ kiryu/
 │   │   ├── sync.ts           # Background sync + D1 snapshots + 90-day retention
 │   │   ├── cache.ts          # KV cache utility with typed get/set/invalidate
 │   │   ├── trends.ts         # D1 historical trend queries (period-over-period)
-│   │   └── report.ts         # Monthly report generation + R2 storage
+│   │   ├── report.ts         # Monthly report generation + R2 storage
+│   │   ├── topology-builder.ts # Azure DC: stitches ARM resources into VNet→Subnet→VM hierarchy
+│   │   └── topology-svg.ts     # Azure DC: server-side SVG layout engine for network topology
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
-├── packages/db/migrations/   # D1 SQL migrations (9 files)
+├── packages/db/migrations/   # D1 SQL migrations (10 files)
 └── mcp-servers/security-dashboard/  # MCP server (69 tools)
 ```
 
@@ -140,12 +146,15 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **ZDX** (`zdx-client.ts`) — Digital Experience monitoring. All endpoints use `since` param (hours, default 2). Does NOT support `limit`/`offset` — pagination is cursor-based via `next_offset` in responses. Methods: `getApps()` (scores, regions, users), `getDeviceCount()` (enrolled devices), `getAlerts()` (active alert rules). `getSummary()` calls all three in parallel via `Promise.allSettled`.
   - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler. D1 stores daily aggregates (traffic totals, incident count, shadow IT total/high-risk, threat category count) plus top-5 JSON snapshots (protocols, locations, threats, incidents, riskiest shadow IT apps) for trend tracking.
   - **Risk360 / ZRA** — No public API exists (as of Feb 2026). The `RISK_SCORE` type exists in the ZINS GraphQL schema but is not exposed as a queryable root field (confirmed by Zscaler SDK PR #443). REST paths under `/zra/` and `/risk360/` on the OneAPI gateway return 401 — no service is registered. Risk360 scores must be entered manually via `POST /api/integrations/zscaler/risk360` and are stored in KV. Monitor the ZIdentity admin portal (API Resources) and Zscaler SDK releases for future API availability.
+- **Azure DC** — Separate ARM REST API client from MicrosoftClient — same Azure credentials, dedicated to infrastructure topology. KV-cached OAuth (`auth:azure-arm:token`, 58 min TTL) with in-flight dedup. `paginateArm<T>()` for `nextLink` pagination with MAX_PAGES=10. Requires `AZURE_SUBSCRIPTION_ID`. 7 list methods: VMs (with `$expand=instanceView` for power states), VNets, NICs, NSGs, Public IPs, Load Balancers, Route Tables. `getTopology()` orchestrates all via `Promise.allSettled`, enriches VMs with NIC data (private IP, public IP, subnet mapping). All ARM resource IDs lowercased for case-insensitive matching.
 - **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
 - **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. `getGatewayLogs()` uses GraphQL variables (not string interpolation) to prevent injection. Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
 ### Services
 - **CacheService** (`services/cache.ts`) — KV wrapper. Keys follow `{prefix}:{period}` pattern (e.g. `cs:summary:7d`). `invalidatePrefix()` paginates via cursor.
-- **SyncService** (`services/sync.ts`) — Cron-triggered: runs 8 parallel tasks (crowdstrike, salesforce, microsoft, zscaler, meraki, abnormal, intune, entra) → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL via `cacheDashboardData()`). Intune and Entra run as separate parallel tasks (`syncIntuneCache`, `syncEntraCache`) that pre-compute and cache their respective page data. Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
+- **SyncService** (`services/sync.ts`) — Cron-triggered: runs 9 parallel tasks (crowdstrike, salesforce, microsoft, zscaler, meraki, abnormal, intune, entra, azure-dc) → stores daily snapshots in D1 → **pre-caches dashboard data to KV** (20 min TTL via `cacheDashboardData()`). Intune, Entra, and Azure DC run as separate parallel tasks that pre-compute and cache their respective page data. Azure DC sync fetches ARM topology, builds SVG, caches both to KV, and stores D1 snapshot. Zscaler sync stores extended ZINS analytics: aggregate counts (shadow IT total/high-risk, threat categories) + top-5 JSON snapshots (protocols, locations, threats, incidents, shadow IT apps). 90-day retention with batched deletes (MAX_BATCHES=200 safety limit per table).
+- **TopologyBuilder** (`services/topology-builder.ts`) — `buildTopology(raw)` stitches ARM resources into VNet→Subnet→VM hierarchy. Builds subnet→VMs index, NSG lookup map, deduplicates peerings. Computes stats (vmsByOS, vmsBySize, vmsByLocation, power state counts). Identifies orphaned VMs not attached to any known subnet.
+- **TopologySVG** (`services/topology-svg.ts`) — `renderTopologySVG(topology)` generates server-side SVG string. 2-column grid layout with shortest-column placement. VNets as containers, subnets nested, VMs as colored rectangles (green=running, gray=deallocated, red=stopped). NSG badges, public IP dots, dashed peering lines. Uses `escapeXml()` for user-controlled strings.
 - **TrendService** (`services/trends.ts`) — Queries D1 for current vs previous period, returns `TrendData` (changePercent, direction, sparkline). `ZscalerTrends` includes 12 fields: ZPA health, ZIA rules, ZDX scores, Risk360, and ZINS analytics (traffic, incidents, shadow IT, threat categories). `MicrosoftTrends` includes 9 fields: alerts active, secure score, risky users, incidents open, and 5 Intune metrics (devices total, compliant, non-compliant, stale, encrypted). Uses `Record<string, unknown>` for D1 rows (no `any`).
 - **ReportService** (`services/report.ts`) — Generates self-contained HTML reports from D1 data, stores in R2. Rules-based recommendation engine. Live API fallback has 25s timeout.
 
@@ -159,7 +168,8 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
-- **IntuneDashboard.tsx** — Dedicated Intune device management page at `/intune`. Shows: fleet KPIs (total devices, compliance rate, encryption rate), health alerts (stale 30d+, reboot needed 14d+, jailbroken), OS breakdown by platform, ownership (corporate/personal), enrollment velocity, OS version currency bars per platform, per-policy compliance table, jailbroken/non-compliant/stale device tables with device details, reboot needed table (via beta API). Cross-navigation to main Security Dashboard.
+- **IntuneDashboard.tsx** — Dedicated Intune device management page at `/intune`. Shows: fleet KPIs (total devices, compliance rate, encryption rate), health alerts (stale 30d+, reboot needed 14d+, jailbroken), OS breakdown by platform, ownership (corporate/personal), enrollment velocity, OS version currency bars per platform, per-policy compliance table, jailbroken/non-compliant/stale device tables with device details, reboot needed table (via beta API). Cross-navigation to Security Dashboard, Entra ID, Azure DC.
+- **AzureDCDashboard.tsx** — Dedicated Azure DC topology page at `/azure-dc`. States: not-configured, awaiting-sync, error (with stale cache fallback), normal. Row 1: 6 KPI cards (VMs, VNets, NSGs, Public IPs, Load Balancers, VM Uptime %). Row 2: 3 DonutCharts (power state, OS, location). Row 3: SVG topology diagram with legend (injected via `raw()`). Row 4: VM table (name, RG, VNet/Subnet, private IP, public IP, size, OS, state). Row 5: NSG rules panel with overly-permissive rule highlighting. Row 6: VM sizes table. Cross-navigation to Security Dashboard, Intune, Entra ID.
 - **Layout.tsx** — Base HTML shell with all CSS. Uses Outfit (sans) + JetBrains Mono (data values) fonts. Includes executive-specific styles (`.exec-headline` 3-col, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), platform status row (`.platform-status-row`), page navigation (`.tab-link`, `.tab-active`), and `.sr-only` utility. Tab JS manages `aria-selected` state.
 
 ## API Routes
@@ -169,6 +179,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 - `GET /` — Dashboard UI (KV-cached, default `?period=24h`, `?refresh=true`)
 - `GET /intune` — Dedicated Intune device management page (KV-cached, `?refresh=true`)
 - `GET /entra` — Entra ID Security page (KV-cached, `?refresh=true`)
+- `GET /azure-dc` — Azure DC network topology page (KV-cached, `?refresh=true`)
 - `GET /health` — Health check (public, not behind Zero Trust)
 - `GET /api/dashboard/{summary,platforms/status,trends,threats/timeline,incidents/recent,tickets/metrics,executive-summary}` — Dashboard data APIs
 - `GET /api/integrations/crowdstrike/{summary,alerts,hosts,incidents,vulnerabilities,identity,discover,sensors,intel,crowdscore,zta,ngsiem,overwatch,diagnostic}` — CrowdStrike (each has `/list` variant for raw data)
@@ -177,6 +188,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 - `GET /api/integrations/meraki/{test,summary,devices,networks,vpn,uplinks}` — Meraki
 - `GET /api/integrations/zscaler/{test,summary,zia,zpa,zpa/connectors,zdx,zdx/apps,zdx/alerts,analytics,analytics/schema,risk360,diagnostic}` — Zscaler (`POST risk360` to set scores, `POST analytics/query` for raw ZINS GraphQL)
 - `GET /api/integrations/entra/{summary,risky-users,risk-detections,mfa-status,conditional-access,privileged-roles,app-credentials}` — Entra ID
+- `GET /api/integrations/azure-dc/{test,topology,summary,vnets,vms,nsgs}` — Azure DC (topology is KV-cached, `?refresh=true`)
 - `GET /api/integrations/abnormal/{threats,stats,cases}` — Abnormal
 - `GET /api/integrations/cloudflare/{access/logs,gateway/logs,security/events,stats,access/apps}` — Cloudflare
 - `GET /api/reports`, `GET /api/reports/latest`, `GET /api/reports/:yearMonth`, `POST /api/reports/generate` — Reports
@@ -203,6 +215,7 @@ Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API
 - `zscaler_metrics_daily` - Daily Zscaler snapshots (ZIA, ZPA, ZDX, Analytics with ZINS breakdowns, Risk360)
 - `meraki_metrics_daily` - Daily Meraki snapshots (devices, networks, VPN, uplinks, licensing)
 - `microsoft_metrics_daily` - Daily Microsoft snapshots (alerts, Defender, Secure Score, identity, incidents, machines, assessments, compliance, Intune devices/policies/apps)
+- `azure_dc_metrics_daily` - Daily Azure DC snapshots (VNets, subnets, peerings, VMs by state, public IPs, NSGs, load balancers)
 - `data_retention_log` - Tracks automated cleanup runs (90-day retention)
 
 ## Environment Variables
@@ -236,7 +249,7 @@ DASHBOARD_API_KEY
 ### Optional (for additional integrations)
 ```bash
 CROWDSTRIKE_BASE_URL         # Region override (default: https://api.crowdstrike.com)
-AZURE_SUBSCRIPTION_ID        # Scope Cloud Defender recommendations to a subscription
+AZURE_SUBSCRIPTION_ID        # Required for Azure DC topology + Cloud Defender recommendations
 ABNORMAL_API_TOKEN
 ABNORMAL_BASE_URL            # Base URL override
 
@@ -298,7 +311,7 @@ All external API calls have AbortController timeouts:
 - Dashboard platform fetches: 10s timeout (in `ui.tsx`, fallback only — normally served from cron-written KV cache)
 
 ### OAuth In-Flight Dedup
-All three OAuth clients (CS, SF, MS) deduplicate concurrent auth requests via `pendingAuth` promise tracking — prevents thundering herd on token expiry.
+All four OAuth clients (CS, SF, MS, Azure ARM) deduplicate concurrent auth requests via `pendingAuth` promise tracking — prevents thundering herd on token expiry.
 
 ### Batched Database Operations
 Sync service uses `DB.batch()` for all bulk inserts instead of sequential statements. Data retention cleanup runs batched DELETEs with `LIMIT 500` and a `MAX_BATCHES=200` safety cap (100k rows max per table per run) to avoid locking or runaway loops.
@@ -347,9 +360,9 @@ crowdstrike = await csClient.getFullSummary(daysBack, 30);
 await cache.set(csCacheKey, crowdstrike, CACHE_TTL.DASHBOARD_DATA);
 ```
 
-### Cache-Only Pages (Intune, Entra)
+### Cache-Only Pages (Intune, Entra, Azure DC)
 ```typescript
-// ui.tsx: /intune and /entra read from KV only — no live API fallback on normal load
+// ui.tsx: /intune, /entra, and /azure-dc read from KV only — no live API fallback on normal load
 const cached = await cache.get<EntraSummary>(cacheKey);
 if (!forceRefresh) {
   return c.html(<EntraDashboard data={cached?.data ?? null} cachedAt={cached?.cachedAt ?? null} />);
