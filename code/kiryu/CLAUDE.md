@@ -56,7 +56,7 @@ Kiryu is a unified security operations dashboard built on Cloudflare Workers. It
 - **Storage**: Cloudflare R2 (monthly executive reports)
 - **Validation**: Zod (dashboard API query params via `zValidator`)
 - **Auth**: Cloudflare Zero Trust (dashboard), API Key (programmatic)
-- **AI Integration**: MCP server with 69 tools
+- **AI Integration**: MCP server with 68 tools
 
 ## Common Commands
 
@@ -101,7 +101,7 @@ kiryu/
 │   │   ├── EntraDashboard.tsx  # Entra ID identity security page
 │   │   ├── AzureDCDashboard.tsx # Azure DC network topology page
 │   │   ├── ReportTemplate.tsx # Self-contained HTML monthly report
-│   │   └── components/       # MetricCard, GaugeChart, DonutChart, SecurityScore, ThreatChart
+│   │   └── components/       # MetricCard, GaugeChart, DonutChart, SecurityScore, ThreatChart, IncidentTable, PlatformStatus
 │   ├── routes/
 │   │   ├── ui.tsx            # Dashboard HTML route (/) + Intune (/intune) + Entra (/entra) + Azure DC (/azure-dc) with KV cache
 │   │   ├── dashboard.ts      # Dashboard API (summary, trends, executive-summary)
@@ -129,7 +129,7 @@ kiryu/
 │   ├── middleware/           # Auth, error handling
 │   └── types/env.ts          # Environment types
 ├── packages/db/migrations/   # D1 SQL migrations (10 files)
-└── mcp-servers/security-dashboard/  # MCP server (69 tools)
+└── mcp-servers/security-dashboard/  # MCP server (68 tools)
 ```
 
 ## Key Files
@@ -146,7 +146,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **ZDX** (`zdx-client.ts`) — Digital Experience monitoring. All endpoints use `since` param (hours, default 2). Does NOT support `limit`/`offset` — pagination is cursor-based via `next_offset` in responses. Methods: `getApps()` (scores, regions, users), `getDeviceCount()` (enrolled devices), `getAlerts()` (active alert rules). `getSummary()` calls all three in parallel via `Promise.allSettled`.
   - **Analytics (ZINS)** — Uses Z-Insights GraphQL API at `/zins/graphql`. Root fields are UPPERCASE (`WEB_TRAFFIC`, `CYBER_SECURITY`, `SHADOW_IT`). Times are epoch milliseconds (not ISO). 3 domains queried in parallel: web traffic (transactions, locations, protocols, threat classes), cyber security incidents (7/14-day intervals only, end_time must be 1+ day before now), shadow IT (app discovery with risk scores). IOT domain returns 403 (not provisioned). FIREWALL and SAAS_SECURITY not available. Introspection is disabled by Zscaler. D1 stores daily aggregates (traffic totals, incident count, shadow IT total/high-risk, threat category count) plus top-5 JSON snapshots (protocols, locations, threats, incidents, riskiest shadow IT apps) for trend tracking.
   - **Risk360 / ZRA** — No public API exists (as of Feb 2026). The `RISK_SCORE` type exists in the ZINS GraphQL schema but is not exposed as a queryable root field (confirmed by Zscaler SDK PR #443). REST paths under `/zra/` and `/risk360/` on the OneAPI gateway return 401 — no service is registered. Risk360 scores must be entered manually via `POST /api/integrations/zscaler/risk360` and are stored in KV. Monitor the ZIdentity admin portal (API Resources) and Zscaler SDK releases for future API availability.
-- **Azure DC** — Separate ARM REST API client from MicrosoftClient — same Azure credentials, dedicated to infrastructure topology. KV-cached OAuth (`auth:azure-arm:token`, 58 min TTL) with in-flight dedup. `paginateArm<T>()` for `nextLink` pagination with MAX_PAGES=10. Requires `AZURE_SUBSCRIPTION_ID`. 7 list methods: VMs (with `$expand=instanceView` for power states), VNets, NICs, NSGs, Public IPs, Load Balancers, Route Tables. `getTopology()` orchestrates all via `Promise.allSettled`, enriches VMs with NIC data (private IP, public IP, subnet mapping). All ARM resource IDs lowercased for case-insensitive matching.
+- **Azure DC** — Separate ARM REST API client from MicrosoftClient — same Azure credentials, dedicated to infrastructure topology. KV-cached OAuth (`auth:azure-arm:token`, 58 min TTL) with in-flight dedup. `paginateArm<T>()` for `nextLink` pagination with MAX_PAGES=10. Requires `AZURE_SUBSCRIPTION_ID` + Reader RBAC role on subscription. 7 list methods: VMs (parallel `statusOnly=true` call for power states — `$expand=instanceView` is not supported at subscription level), VNets, NICs, NSGs, Public IPs, Load Balancers, Route Tables. `getTopology()` orchestrates all via `Promise.allSettled`, enriches VMs with NIC data (private IP, public IP, subnet mapping). All ARM resource IDs lowercased for case-insensitive matching.
 - **Abnormal** — Bearer token auth (`ABNORMAL_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. Methods: `getThreats()`, `getThreatDetails()`, `getCases()`, `getStats()`.
 - **Cloudflare** — Bearer token auth (`CLOUDFLARE_API_TOKEN`). Has `isConfigured()`. 20s AbortController timeout on all requests. `getGatewayLogs()` uses GraphQL variables (not string interpolation) to prevent injection. Methods: `getAccessLogs()`, `getGatewayLogs()`, `getSecurityEvents()`, `getAccessApps()`, `getStats()`.
 
@@ -168,6 +168,7 @@ All follow the same pattern: `isConfigured()` → OAuth with KV caching → `get
   - **Helper functions**: `formatCompact(n)` (1.2M, 3.4B), `formatBytes(bytes)` (1.0 MB), `calculateHealthIndicators()` (5 composite scores from cross-platform data), `calculateCompositeScore()` (weighted security score from CS + MS).
 - **DonutChart** (`components/DonutChart.tsx`) — Shared donut chart component with built-in `compact()` formatter for center totals and legend values (K/M/B suffixes for large numbers).
 - **ReportTemplate.tsx** — Self-contained HTML monthly report with inline CSS and `escapeHtml()` for raw string output.
+- **EntraDashboard.tsx** — Dedicated Entra ID security page at `/entra`. States: not-configured, awaiting-sync, error (with stale cache fallback), normal. KPI cards for risky users, risk detections, MFA gaps, CA policies, privileged roles, expiring app credentials, stale/guest users. Tables for risky users, risk detections, privileged roles, expiring credentials. Cross-navigation to Security Dashboard, Intune, Azure DC.
 - **IntuneDashboard.tsx** — Dedicated Intune device management page at `/intune`. Shows: fleet KPIs (total devices, compliance rate, encryption rate), health alerts (stale 30d+, reboot needed 14d+, jailbroken), OS breakdown by platform, ownership (corporate/personal), enrollment velocity, OS version currency bars per platform, per-policy compliance table, jailbroken/non-compliant/stale device tables with device details, reboot needed table (via beta API). Cross-navigation to Security Dashboard, Entra ID, Azure DC.
 - **AzureDCDashboard.tsx** — Dedicated Azure DC topology page at `/azure-dc`. States: not-configured, awaiting-sync, error (with stale cache fallback), normal. Row 1: 6 KPI cards (VMs, VNets, NSGs, Public IPs, Load Balancers, VM Uptime %). Row 2: 3 DonutCharts (power state, OS, location). Row 3: SVG topology diagram with legend (injected via `raw()`). Row 4: VM table (name, RG, VNet/Subnet, private IP, public IP, size, OS, state). Row 5: NSG rules panel with overly-permissive rule highlighting. Row 6: VM sizes table. Cross-navigation to Security Dashboard, Intune, Entra ID.
 - **Layout.tsx** — Base HTML shell with all CSS. Uses Outfit (sans) + JetBrains Mono (data values) fonts. Includes executive-specific styles (`.exec-headline` 3-col, `.exec-health-grid`, `.exec-summary-grid`), horizontal bar chart (`.hbar-*`), health indicator cards (`.exec-health-card`), platform status row (`.platform-status-row`), page navigation (`.tab-link`, `.tab-active`), and `.sr-only` utility. Tab JS manages `aria-selected` state.
@@ -196,7 +197,7 @@ Route files: `routes/ui.tsx`, `routes/dashboard.ts`, `routes/reports.ts`, `route
 
 ## MCP Server
 
-Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 69 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (13, including Intune summary/devices/policies/apps/stale/reboot-needed/compliance-policies), Entra ID (7), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
+Located at `mcp-servers/security-dashboard/`. Proxies to the worker API with API key auth. 68 tools covering all platforms: Dashboard/Reports (7), CrowdStrike (12), Microsoft (13, including Intune summary/devices/policies/apps/stale/reboot-needed/compliance-policies), Entra ID (7), Zscaler (9, including connectors and raw GraphQL query), Meraki (5), Cloudflare (5), Salesforce (4), Abnormal (3), Reports (2). See [mcp-servers/README.md](./mcp-servers/README.md) for the full tool list and setup instructions.
 
 ## Database Schema
 
@@ -446,6 +447,9 @@ For platform-specific issues (permissions, empty responses, 403/401 errors), see
 
 ### Local dev with `wrangler dev --remote` requires cloudflared
 -> Install `cloudflared` via `brew install cloudflared`. The worker is behind Cloudflare Access, so `--remote` needs a tunnel. Alternatively, use `wrangler dev` (local mode) which uses `.dev.vars` secrets and local D1/KV/R2 preview bindings.
+
+### Azure DC returns "Failed to load Azure DC data"
+-> The App Registration needs the **Reader** RBAC role on the Azure subscription. Go to Subscriptions -> your subscription -> Access control (IAM) -> Add role assignment -> Reader -> assign to the App Registration (`AZURE_CLIENT_ID`). Note: Graph/Defender API permissions alone are not sufficient for ARM API access.
 
 ### Deploy fails with "No project was selected"
 -> Run from `apps/worker/` directory: `cd apps/worker && npx wrangler deploy` (or `pnpm deploy` from the monorepo root)
